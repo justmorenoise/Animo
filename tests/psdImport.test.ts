@@ -6,6 +6,8 @@ import { newAssetId } from "@/core/doc/ids";
 import { resolveAlpha } from "@/io/import/psdReader";
 import { parsePsd, type PsdRaw } from "@/io/import/psdParse";
 import { isImage, isSymbol, type SymbolItem } from "@/core/doc/types";
+import { createProject } from "@/core/doc/defaults";
+import { libraryRows } from "@/core/doc/libraryTree";
 
 function img(name: string, x: number, y: number, w = 10, h = 10, visible = true): PsdPlan {
   return { kind: "image", name, x, y, width: w, height: h, assetId: newAssetId(), visible };
@@ -153,6 +155,56 @@ describe("PSD layer alpha", () => {
     // A fully hiding mask at half density hides half.
     resolveAlpha(d, 2, 2, 1, 10, 10, mask([0, 0, 0, 0], 10, 10, 0, 0.5));
     expect(alphas(d)).toEqual([128, 128, 100, 50]);
+  });
+});
+
+describe("PSD import builds library folders like the Layers panel", () => {
+  /** The library an import produces, as indented rows. */
+  function library(result: ReturnType<typeof buildPsdImport>): string[] {
+    const p = createProject("host");
+    for (const f of result.folders) p.folders[f.id] = f;
+    for (const i of result.items) { p.items[i.id] = i; p.itemOrder.push(i.id); }
+    return libraryRows(p, { collapsed: new Set(), filter: "", sortDir: 1 })
+      .map((r) => `${"  ".repeat(r.depth)}${r.name}${r.kind === "folder" ? "/" : ""}`);
+  }
+
+  it("one folder per group, holding its symbol and its layers; the document's at the top", () => {
+    const result = buildPsdImport("frog", [
+      img("background", 0, 0),
+      group("eyes", [group("eye_left", [img("pupil", 0, 0)]), img("eye_right", 0, 0)]),
+    ], () => false, "frog 2");
+    expect(library(result)).toEqual([
+      "frog 2/",
+      "  eyes/",
+      "    eye_left/",
+      "      eye_left",
+      "      pupil",
+      "    eye_right",
+      "    eyes",
+      "  background",
+      "  frog",
+    ]);
+    expect(result.folders[0]).toMatchObject({ name: "frog 2", parentId: null });
+    // Parents before children, so adding them in order never leaves a dangling parent.
+    const seen = new Set<string>();
+    for (const f of result.folders) {
+      expect(f.parentId === null || seen.has(f.parentId)).toBe(true);
+      seen.add(f.id);
+    }
+  });
+
+  it("an empty group gets no folder; two groups with one name get two", () => {
+    const result = buildPsdImport("doc", [
+      group("empty", []), group("arm", [img("a", 0, 0)]), group("arm", [img("b", 0, 0)]),
+    ]);
+    // Built from the top of Photoshop's panel down: the front "arm" (the later
+    // child) is met first and keeps the plain name, folder and symbol alike.
+    expect(library(result)).toEqual([
+      "doc/",
+      "  arm/", "    arm", "    b",
+      "  arm 2/", "    a", "    arm_2",
+      "  doc", "  empty",
+    ]);
   });
 });
 

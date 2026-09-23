@@ -1100,6 +1100,8 @@ rules live, so `tests/psdImport.test.ts` can exercise all of them).
 
 - Photoshop stores `children` **bottom-to-top**; our `layers[0]` is the front. The lists
   are reverses of each other — verified against the fixture's own composite, not assumed.
+- Each group also becomes a library folder with its symbol and its layers' images in
+  it, under a top folder named after the file (see ▸ Folders and keys).
 - Group symbols are built around the top-left of their content's bounding box; the
   instance carries the offset. Positions survive; origins stay near the artwork.
 - Layer opacity is baked into the PNG alpha: a node has no colour transform in the bind
@@ -1163,8 +1165,10 @@ saved.
   `libraryRows` (folders first, numeric name order, a search opens the folders
   on the way to a match), `stepRow`, `canMoveFolder`, `deletePlan`.
   `validateProject` drops malformed folders and cuts loops and dangling links to
-  the top level. A PSD import puts everything it makes in one folder named after
-  the file; Duplicate keeps the copy next to the original.
+  the top level. A PSD import mirrors the Layers panel: a top folder named
+  after the file, one folder per group holding the group's symbol and its
+  layers' images (`buildPsdImport` returns them, parents first). A group with
+  no layers gets no folder. Duplicate keeps the copy next to the original.
 - **Keys** act while the list has the focus (a click on a row gives it): ↑ ↓
   Home End walk the rows and the preview follows, → ← open and close folders or
   go to the parent, Enter edits a symbol or opens a folder, F2 renames, Delete

@@ -1,5 +1,4 @@
 import type { Store } from "./Store";
-import { newFolderId } from "@/core/doc/ids";
 import { uniqueFolderName } from "@/core/doc/libraryTree";
 import { AddFolder } from "@/core/history/libraryCommands";
 import type { AssetStore } from "./AssetStore";
@@ -71,7 +70,10 @@ export async function importPsd(
 
   const plan = await toPlan(doc.children);
   const taken = new Set(Object.values(store.project.items).map((i) => i.name));
-  const { items, root } = buildPsdImport(doc.name, plan, (name) => taken.has(name));
+  // Its groups become library folders under one named after the file: a PSD
+  // brings dozens of items, and loose they bury the rest of the library.
+  const { items, root, folders } = buildPsdImport(
+    doc.name, plan, (name) => taken.has(name), uniqueFolderName(store.project, null, doc.name));
 
   const hostId = store.currentSymbolId;
   // A PSD is usually bigger than an 800x600 stage, and landing mostly
@@ -86,13 +88,8 @@ export async function importPsd(
   const instance = createNode("symbol", root.name, { itemId: root.id, x: at.x, y: at.y });
   const layer = createLayer(instance.id, instance.name, store.currentSymbol.layers.length);
 
-  // Its layers and groups go in one library folder named after the file: a
-  // PSD brings dozens of items, and loose they bury the rest of the library.
-  const folder = { id: newFolderId(), name: uniqueFolderName(store.project, null, doc.name), parentId: null };
-  for (const item of items) item.folderId = folder.id;
-
   store.transaction(`Import ${file.name}`, () => {
-    store.apply(new AddFolder(folder));
+    for (const f of folders) store.apply(new AddFolder(f));
     // Children before parents, so a symbol never references an item the
     // library has not seen yet.
     for (const item of items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
@@ -114,6 +111,6 @@ export async function importPsd(
     symbols: items.length - images,
     stage: resizeStage ? { width: doc.width, height: doc.height } : null,
     warnings: doc.warnings,
-    folderName: folder.name,
+    folderName: folders[0]!.name,
   };
 }
