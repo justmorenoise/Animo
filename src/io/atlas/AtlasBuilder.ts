@@ -1,10 +1,13 @@
 import { DEFAULT_PACK, type PackOptions, type PackPage, packRects } from "@/core/atlas/MaxRectsPacker";
+import type { ItemId } from "@/core/doc/ids";
+import { AtlasTooSmall, type Oversized, regionFits } from "@/core/atlas/oversize";
 import { alphaBounds, type TrimResult } from "@/core/atlas/trim";
 import type { DbAtlas, DbSubTexture } from "@/core/export/dbTypes";
 import type { Asset, AssetStore } from "@/app/AssetStore";
 import type { ImageItem } from "@/core/doc/types";
 import { type AtlasLayout, type ExportSettings, type ImageFormat, pageLimit, type Resample } from "@/core/export/settings";
-import { resampleRgba, scaledSize } from "@/core/atlas/resample";
+import { scaledSize } from "@/core/atlas/resample";
+import { resampleOffThread } from "@/io/workers/resample";
 
 export interface AtlasOptions extends PackOptions {
   /** Duplicate edge pixels into the padding gap to stop bilinear bleeding. */
@@ -115,26 +118,31 @@ function trimOf(
   return trim;
 }
 
-/** Resampled copies per asset, per size and filter. */
-const scaledCache = new WeakMap<Asset, Map<string, { canvas: HTMLCanvasElement; data: ImageData }>>();
+/** Resampled copies per asset, per size and filter, as promises: the
+ *  resampling runs on workers, and two builds asking at once share one. */
+type Scaled = { canvas: HTMLCanvasElement; data: ImageData } | null;
+const scaledCache = new WeakMap<Asset, Map<string, Promise<Scaled>>>();
 
 function scaledCopy(
   asset: Asset, assets: AssetStore, w: number, h: number, filter: Resample,
-): { canvas: HTMLCanvasElement; data: ImageData } | null {
+): Promise<Scaled> {
   const key = `${w}x${h}|${filter}`;
   let byKey = scaledCache.get(asset);
   const hit = byKey?.get(key);
   if (hit) return hit;
   const px = assets.pixels(asset.id);
-  if (!px) return null;
-  const data = new ImageData(resampleRgba(px.data, px.width, px.height, w, h, filter), w, h);
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  canvas.getContext("2d")!.putImageData(data, 0, 0);
+  if (!px) return Promise.resolve(null);
+  const made = resampleOffThread(px.data, px.width, px.height, w, h, filter).then((out) => {
+    const data = new ImageData(out, w, h);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d")!.putImageData(data, 0, 0);
+    return { canvas, data };
+  });
   if (!byKey) scaledCache.set(asset, (byKey = new Map()));
-  const made = { canvas, data };
   byKey.set(key, made);
+  made.catch(() => byKey!.delete(key));
   return made;
 }
 
@@ -157,6 +165,9 @@ export async function buildAtlas(
   atlasName: string,
   fileBase: string,
   opts: AtlasOptions = DEFAULT_ATLAS,
+  /** 0..1: the resampled copies are the first half when the scale is below 1,
+   *  the page encoding the rest. */
+  onProgress: (fraction: number) => void = () => {},
 ): Promise<AtlasPage[]> {
   if (items.length === 0) return [];
   const key = atlasKey(items, atlasName, fileBase, opts);
@@ -164,6 +175,18 @@ export async function buildAtlas(
   if (lastBuild && lastBuild.key === key && lastBuild.assets.length === used.length
       && lastBuild.assets.every((a, n) => a === used[n])) {
     return lastBuild.pages;
+  }
+
+  // Every resampled copy first, so the workers run them side by side.
+  const scaling = opts.scale < 1;
+  if (scaling) {
+    let done = 0;
+    await Promise.all(items.map(async (item) => {
+      const asset = assets.get(item.assetId);
+      const { w, h } = scaledSize(item.width, item.height, opts.scale);
+      if (asset) await scaledCopy(asset, assets, w, h, opts.resample);
+      onProgress((0.5 * ++done) / items.length);
+    }));
   }
 
   // Trim, and deduplicate by content so a repeated image is packed once.
@@ -178,7 +201,7 @@ export async function buildAtlas(
     let pixels = () => assets.pixels(asset.id);
     if (opts.scale < 1) {
       ({ w: width, h: height } = scaledSize(item.width, item.height, opts.scale));
-      const copy = scaledCopy(asset, assets, width, height, opts.resample);
+      const copy = await scaledCopy(asset, assets, width, height, opts.resample);
       if (copy) {
         source = copy.canvas;
         pixels = () => copy.data;
@@ -196,6 +219,15 @@ export async function buildAtlas(
     entries.push(entry);
     if (!byKey.has(key)) byKey.set(key, entry);
   }
+
+  // Checked here rather than left to the packer, which only knows region
+  // keys: the user needs the images by name, and every one of them at once.
+  const oversized = new Map<ItemId, Oversized>();
+  for (const e of byKey.values()) {
+    if (regionFits(e.trim.width + opts.extrude * 2, e.trim.height + opts.extrude * 2, opts)) continue;
+    oversized.set(e.item.id, { name: e.item.name, width: e.item.width, height: e.item.height });
+  }
+  if (oversized.size) throw new AtlasTooSmall([...oversized.values()], { w: opts.maxWidth, h: opts.maxHeight });
 
   const regions = [...byKey.values()].map((e) => ({
     id: e.key,
@@ -217,6 +249,7 @@ export async function buildAtlas(
 
     const canvas = renderPage(page, placed, byKey, opts);
     const blob = await encodePage(canvas, opts);
+    onProgress((scaling ? 0.5 : 0) + ((scaling ? 0.5 : 1) * (p + 1)) / pages.length);
 
     // Every entry whose region landed on THIS page gets a SubTexture, even
     // when several entries share one region.

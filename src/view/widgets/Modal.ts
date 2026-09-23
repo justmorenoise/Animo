@@ -3,7 +3,8 @@ import { h, on } from "./dom";
 export interface ModalOptions {
   title: string;
   width: number;
-  height: number;
+  /** Omitted: as tall as the content (the message dialogs). */
+  height?: number;
   onClose?(): void;
 }
 
@@ -41,7 +42,7 @@ export class Modal {
 
     const box = h("div", {
       class: "modal-box",
-      style: { width: `${opts.width}px`, height: `${opts.height}px` },
+      style: { width: `${opts.width}px`, ...(opts.height ? { height: `${opts.height}px` } : {}) },
     },
       h("div", { class: "modal-bar" },
         h("span", { class: "modal-title" }, opts.title),

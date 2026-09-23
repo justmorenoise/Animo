@@ -1,4 +1,5 @@
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strFromU8, strToU8 } from "fflate";
+import { unzipFiles, zipFiles } from "@/io/zip";
 import type { Project } from "@/core/doc/types";
 import { isImage } from "@/core/doc/types";
 import type { AssetId } from "@/core/doc/ids";
@@ -53,15 +54,16 @@ export async function serializeProject(project: Project, assets: AssetStore): Pr
   files["project.json"] = strToU8(json);
   files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 2));
 
-  // Images are already compressed; storing them again just costs time.
-  const zipped = zipSync(files, { level: 6 });
+  const zipped = await zipFiles(files);
   return new Blob([zipped as unknown as BlobPart], { type: "application/zip" });
 }
 
 export async function deserializeProject(
   data: ArrayBuffer, assets: AssetStore,
+  /** 0..1 as the images are decoded, which is most of the time a load takes. */
+  onProgress: (fraction: number) => void = () => {},
 ): Promise<LoadedProject> {
-  const entries = unzipSync(new Uint8Array(data));
+  const entries = await unzipFiles(new Uint8Array(data));
 
   const projectRaw = entries["project.json"];
   if (!projectRaw) {
@@ -84,7 +86,10 @@ export async function deserializeProject(
     : { assets: {} };
 
   assets.clear();
-  for (const [id, path] of Object.entries(manifest.assets)) {
+  const listed = Object.entries(manifest.assets);
+  let decoded = 0;
+  for (const [id, path] of listed) {
+    onProgress(decoded++ / listed.length);
     const bytes = entries[path];
     if (!bytes) {
       diagnostics.push({

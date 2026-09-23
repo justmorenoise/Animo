@@ -1,4 +1,4 @@
-import type { DisplayRef, Node, Project } from "./types";
+import type { DisplayRef, LibraryFolder, Node, Project } from "./types";
 import { DEFAULT_MOTION_BLUR, DOC_VERSION, type MotionBlurSettings } from "./types";
 import { observeId } from "./ids";
 import { isDefaultExport, sanitizeExportSettings } from "@/core/export/settings";
@@ -61,11 +61,17 @@ export function validateProject(raw: unknown): ValidationResult {
     if (isDefaultExport(settings)) delete p.exportSettings;
     else p.exportSettings = settings;
   }
-  p.folders ??= {};
+  p.folders = repairFolders(p, diagnostics);
   p.itemOrder = Array.isArray(p.itemOrder) ? p.itemOrder.filter((id) => !!p.items[id]) : [];
   for (const id of Object.keys(p.items)) {
     observeId(id);
     if (!p.itemOrder.includes(id as never)) p.itemOrder.push(id as never);
+  }
+
+  for (const item of Object.values(p.items)) {
+    if (item.folderId !== undefined && (typeof item.folderId !== "string" || !p.folders[item.folderId])) {
+      delete item.folderId;
+    }
   }
 
   for (const [itemId, item] of Object.entries(p.items)) {
@@ -354,3 +360,40 @@ export function migrate(raw: unknown): unknown {
   }
   return p;
 }
+
+/**
+ * Library folders: malformed entries dropped, a parent that does not exist
+ * or closes a loop cut to the top level. Folders only organise the library,
+ * so a repair never touches an item beyond moving it to the top level.
+ */
+function repairFolders(p: Project, diagnostics: Diagnostic[]): Project["folders"] {
+  const raw = (p.folders && typeof p.folders === "object" ? p.folders : {}) as Record<string, unknown>;
+  const out: Project["folders"] = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const f = value as Partial<LibraryFolder> | null;
+    if (!f || typeof f !== "object" || f.id !== key || typeof f.name !== "string") {
+      diagnostics.push({ path: `folders.${key}`, message: "malformed library folder, removed", severity: "warning" });
+      continue;
+    }
+    observeId(f.id);
+    out[f.id] = { id: f.id, name: f.name, parentId: typeof f.parentId === "string" ? f.parentId : null };
+  }
+  for (const f of Object.values(out)) {
+    if (f.parentId && !out[f.parentId]) f.parentId = null;
+    let at = f.parentId;
+    for (let n = 0; at && n <= Object.keys(out).length; n++) {
+      if (at === f.id) {
+        f.parentId = null;
+        diagnostics.push({
+          path: `folders.${f.id}`,
+          message: "library folder was inside itself; moved to the top level",
+          severity: "warning",
+        });
+        break;
+      }
+      at = out[at]?.parentId ?? null;
+    }
+  }
+  return out;
+}
+

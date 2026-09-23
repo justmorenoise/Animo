@@ -67,6 +67,8 @@ export class PreviewSession {
   constructor(
     private readonly store: Store,
     private readonly assets: AssetStore,
+    /** Every build's outcome: the error, or null when it succeeded. */
+    private readonly onBuilt: (error: unknown) => void = () => {},
   ) {
     this.store.subscribe((topic) => {
       // Every edit goes through History, which emits "doc" first. "stage" and
@@ -181,9 +183,11 @@ export class PreviewSession {
       this.result = result;
 
       this.loadAll(result);
+      this.onBuilt(null);
     } catch (err) {
       this.stale = true;
       this.status(err instanceof Error ? err.message : String(err), true);
+      this.onBuilt(err);
     } finally {
       this.busy = false;
       if (this.rerun) {

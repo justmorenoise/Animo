@@ -353,3 +353,29 @@ describe("Set Duration", () => {
     expect(anim.tracks[m.id]!.endFrame).toBe(10);
   });
 });
+
+describe("transaction notifications", () => {
+  it("tells listeners once, when the transaction closes, with every command's touches", () => {
+    const { store, n } = scene();
+    const heard: Array<{ nodes?: string[]; stage?: boolean; entries: number }> = [];
+    store.history.onChange((t) => heard.push({ nodes: t.nodes, stage: t.stage, entries: store.history.canUndo ? 1 : 0 }));
+    const m = createNode("group", "m", { x: 0, y: 0 });
+    store.transaction("two", () => {
+      store.apply(new SetBindTransform(store.currentSymbolId, new Map([[n.id, tf(5, 0)]])));
+      store.apply(new AddNode("add", store.project.rootSymbolId, m, createLayer(m.id, "m", 1), 1));
+      expect(heard).toHaveLength(0);
+    });
+    expect(heard).toHaveLength(1);
+    expect(heard[0]!.nodes).toEqual(expect.arrayContaining([n.id]));
+    // The entry is on the stack by the time listeners run.
+    expect(heard[0]!.entries).toBe(1);
+  });
+
+  it("an empty transaction says nothing", () => {
+    const { store } = scene();
+    let heard = 0;
+    store.history.onChange(() => heard++);
+    store.transaction("none", () => {});
+    expect(heard).toBe(0);
+  });
+});

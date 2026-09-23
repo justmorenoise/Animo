@@ -1,5 +1,9 @@
 import type { Store } from "./Store";
+import { newFolderId } from "@/core/doc/ids";
+import { uniqueFolderName } from "@/core/doc/libraryTree";
+import { AddFolder } from "@/core/history/libraryCommands";
 import type { AssetStore } from "./AssetStore";
+import { phase, type ReportProgress } from "./busy";
 import { type PsdRaw, readPsdFile } from "@/io/import/psdReader";
 import { buildPsdImport, type PsdPlan } from "@/core/doc/psdImport";
 import { AddLibraryItem, AddNode, SetDocumentSettings } from "@/core/history/commands";
@@ -13,6 +17,8 @@ export interface PsdImportOutcome {
   /** Set when the stage was resized to the document; null otherwise. */
   stage: { width: number; height: number } | null;
   warnings: string[];
+  /** The library folder holding everything imported. */
+  folderName: string;
 }
 
 /**
@@ -27,8 +33,13 @@ export async function importPsd(
   store: Store, assets: AssetStore, file: File,
   /** Where the document's canvas origin lands. Defaults to the symbol's own. */
   at: { x: number; y: number } = { x: 0, y: 0 },
+  report: ReportProgress = () => {},
 ): Promise<PsdImportOutcome> {
-  const doc = await readPsdFile(file);
+  const doc = await readPsdFile(file, phase(report, 0, 0.85));
+  const registered = phase(report, 0.85, 1);
+  const layerCount = (raw: PsdRaw[]): number =>
+    raw.reduce((n, r) => n + (r.kind === "group" ? layerCount(r.children) : 1), 0);
+  const totalImages = Math.max(1, layerCount(doc.children));
 
   // Assets are registered before the transaction opens: they live outside the
   // document (the project stores only an AssetId), and decoding is async,
@@ -45,7 +56,7 @@ export async function importPsd(
         continue;
       }
       const asset = await assets.addFromBlob(node.blob, node.name || "layer");
-      images++;
+      registered(++images / totalImages);
       out.push({
         kind: "image",
         name: node.name,
@@ -75,7 +86,13 @@ export async function importPsd(
   const instance = createNode("symbol", root.name, { itemId: root.id, x: at.x, y: at.y });
   const layer = createLayer(instance.id, instance.name, store.currentSymbol.layers.length);
 
+  // Its layers and groups go in one library folder named after the file: a
+  // PSD brings dozens of items, and loose they bury the rest of the library.
+  const folder = { id: newFolderId(), name: uniqueFolderName(store.project, null, doc.name), parentId: null };
+  for (const item of items) item.folderId = folder.id;
+
   store.transaction(`Import ${file.name}`, () => {
+    store.apply(new AddFolder(folder));
     // Children before parents, so a symbol never references an item the
     // library has not seen yet.
     for (const item of items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
@@ -97,5 +114,6 @@ export async function importPsd(
     symbols: items.length - images,
     stage: resizeStage ? { width: doc.width, height: doc.height } : null,
     warnings: doc.warnings,
+    folderName: folder.name,
   };
 }

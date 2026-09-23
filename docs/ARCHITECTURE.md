@@ -1091,7 +1091,9 @@ positions) are all behaviour the exported file inherits.
 
 ## PSD import
 
-`io/import/psdReader.ts` (ag-psd, dynamically imported, DOM: canvas → PNG blobs) →
+`io/import/psdReader.ts` (starts `io/workers/psd.worker.ts`; falls back to the page) →
+`io/import/psdParse.ts` (ag-psd plus the layer rules, no DOM: the worker encodes with
+`OffscreenCanvas`, the fallback with a canvas) →
 `app/PsdImport.ts` (registers assets, applies commands in one transaction) →
 `core/doc/psdImport.ts` (pure: plan tree → library items, and the only place the mapping
 rules live, so `tests/psdImport.test.ts` can exercise all of them).
@@ -1151,6 +1153,41 @@ saved.
   re-render while the rename field has focus (⌘Z works in text fields) removes it, the `blur`
   commits, the commit re-renders inside the outer `clear`, and `removeChild` throws in the middle
   of the store's emit.
+
+### Folders and keys
+
+- **Folders** are `Project.folders` (present, empty, since before v7) plus an
+  optional `folderId` on each item; absent is the top level. Organisation only:
+  item names stay unique across the whole library, because the runtime finds
+  textures and armatures by name. `core/doc/libraryTree.ts` is the pure part:
+  `libraryRows` (folders first, numeric name order, a search opens the folders
+  on the way to a match), `stepRow`, `canMoveFolder`, `deletePlan`.
+  `validateProject` drops malformed folders and cuts loops and dangling links to
+  the top level. A PSD import puts everything it makes in one folder named after
+  the file; Duplicate keeps the copy next to the original.
+- **Keys** act while the list has the focus (a click on a row gives it): ↑ ↓
+  Home End walk the rows and the preview follows, → ← open and close folders or
+  go to the parent, Enter edits a symbol or opens a folder, F2 renames, Delete
+  or Backspace deletes. The list stops those keys, so the stage's nudge and
+  delete never see them.
+- **Delete** plans first (`deletePlan`): anything placed in a symbol is refused
+  with a dialog listing where; otherwise it asks, with a "Don't ask again" that
+  Preferences ▸ General ▸ Library turns back on. One undo step, and the row that
+  takes the deleted one's place is selected.
+- **Drag** a row onto a folder to move it in, onto an item to move next to it,
+  onto the empty list to move to the top level.
+
+### An image larger than an atlas page
+
+`buildAtlas` checks every region before packing (`regionFits`, the packer's own
+padding rule) and throws `AtlasTooSmall` with the images by name; the packer's
+error, with its internal region key, is no longer reachable from there.
+`oversizeAdvice` (pure, in `core/atlas/oversize.ts`) turns it into a message
+whose suggestions are computed to fit: the texture scale, rounded down to a
+whole percent, and a page size within the 8192 limit (rounded to a power of two
+when that is on), leaving out whichever cannot work. The export shows it in a
+dialog; the preview, which rebuilds after every edit, shows it once per problem
+and says it in its status line.
 
 ## IndexedDB
 
@@ -1461,6 +1498,73 @@ Read out of the vendored runtime, not assumed:
 - **Power of two rounds the page limit DOWN** (`pageLimit`). Rounding the page
   up and clamping it to a limit that is not a power of two gave pages that were
   not one, silently; the dialog now says what the limit became.
+
+### Future export formats
+
+A video export and a sprite-sheet export are planned for the desktop (Electron)
+build, each with its own settings panel like the atlas. `ExportSettings.format`
+exists so a runtime is a new value rather than a new setting; a video or
+sprite-sheet export is a different kind of output (frames, not a skeleton) and
+gets its own settings object next to this one in `Project`, with the same
+rule: absent = defaults, sanitized on load, pure in `core/export/`.
+
+## Dialogs and the progress card
+
+The browser's `prompt`, `confirm` and `alert` are gone: they block the page,
+ignore the theme and cannot validate. `view/widgets/dialogs.ts` has
+`confirmDialog`, `alertDialog` and `promptText`, all on `Modal` and all
+returning promises; Escape, the close box and the backdrop answer Cancel.
+Numbers use `promptNumber`.
+
+- A `danger` confirm (Discard, an irreversible Revert) focuses Cancel, so
+  Enter keeps the work. Buttons act on `pointerup` like every control here, so
+  Enter and Space are wired by hand.
+- `promptText` validates as you type (`validate`) and will not accept an
+  empty field; Rename shows the name clash under the field instead of a toast
+  after the fact.
+- The dialog is not modal to the document: re-check what the answer applies to
+  (ConvertToSymbol re-validates; Rename Animation checks the animation is still
+  current).
+- `beforeunload` stays the browser's own: a page cannot draw its dialog there.
+- `ProjectService` takes `confirmDiscard` and `busy` through its events, so it
+  stays without DOM (and ready for an Electron main process). Without
+  `confirmDiscard` it keeps the work.
+
+Long operations run through `busy(label, task)` (`view/widgets/Busy.ts`): a
+small card, bottom right, one row per task with a bar. When it shows is
+`busyView` in `app/busy.ts`, pure and table-tested: after 500 ms, and once up
+for at least 400 ms, so a quick operation shows nothing and a slow one does
+not blink. `report(fraction)` fills the bar; a task that never reports sweeps.
+`phase(report, from, to)` gives each step its slice. Wired: open (per image
+decoded), save, export zip and folder (resampling, then pages, then files),
+PNG export, image import (per file), PSD import (per layer, reported from the
+worker as `{progress}` messages, then per asset registered). It does not block
+input: the work is on workers.
+
+## Off the main thread
+
+Measured before moving anything; what blocked the page and where it went:
+
+| Work | Before | Now |
+|---|---|---|
+| Lanczos resample, 4096→1024 | ~950 ms on the page | `io/workers/resample.worker.ts`, a pool of up to 4 |
+| Zip of a 64 MB project, level 6 | ~620 ms | images stored (`zipLevelFor`), fflate's async zip on workers |
+| PSD decode (ag-psd is synchronous) | seconds on a large file | `io/workers/psd.worker.ts` |
+| PSD import redraw | 22 redraws, ~300 ms | one: a transaction notifies once, when it closes |
+
+- `io/workers/WorkerPool.ts`: a worker answers `{ok, value}` or `{ok:false, error}`.
+  A failed task rejects with an Error; a worker that dies rejects with
+  `WorkerCrashed`, and every caller then does the work on the page, so a missing
+  worker costs speed, never the operation. Under vitest (Node, no `Worker`) the
+  same code runs synchronously.
+- PNG and WebP encoding needed nothing: `canvas.toBlob` already encodes off the
+  main thread.
+- The resampled copies are cached as promises per asset, size and filter, and a
+  build asks for all of them before packing, so the pool runs them side by side.
+- `vite.config.ts` builds workers as ES modules (`worker.format`): the IIFE
+  default cannot split chunks.
+- WASM was not worth it: the loops are typed-array code already close to native,
+  and without a worker a faster loop still freezes the page.
 
 ## Runtime extensions
 

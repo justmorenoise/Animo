@@ -1,7 +1,7 @@
 import type { Transform } from "@/core/math/Transform";
 import type { ExportSettings } from "@/core/export/settings";
 import type { ChannelEases, TweenSpec } from "@/core/math/easing";
-import type { AnimId, AssetId, IkId, ItemId, LayerId, NodeId } from "./ids";
+import type { AnimId, AssetId, FolderId, IkId, ItemId, LayerId, NodeId } from "./ids";
 
 /** Bumped whenever the on-disk shape changes; `schema.ts` bridges versions. */
 export const DOC_VERSION = 7;
@@ -52,6 +52,8 @@ export interface ImageItem {
   height: number;
   /** Skip alpha-trimming this image when packing (for pixel-exact art). */
   noTrim?: boolean;
+  /** The library folder holding it; absent: the top level. */
+  folderId?: FolderId;
 }
 
 export interface SymbolItem {
@@ -64,14 +66,18 @@ export interface SymbolItem {
   layers: Layer[];
   ik: IkConstraint[];
   animations: Animation[];
+  /** The library folder holding it; absent: the top level. */
+  folderId?: FolderId;
 }
 
 export type LibraryItem = ImageItem | SymbolItem;
 
+/** A library folder: organisation only, the exporter never sees it. */
 export interface LibraryFolder {
-  id: string;
+  id: FolderId;
   name: string;
-  parentId: string | null;
+  /** null: the top level. */
+  parentId: FolderId | null;
 }
 
 /* ── Nodes ────────────────────────────────────────────────────────────────
@@ -258,7 +264,7 @@ export interface Project {
    *  defaults, which are what the exporter wrote before the setting existed. */
   exportSettings?: ExportSettings;
   items: Record<ItemId, LibraryItem>;
-  folders: Record<string, LibraryFolder>;
+  folders: Record<FolderId, LibraryFolder>;
   /** Item ids in library display order. */
   itemOrder: ItemId[];
   /** The main scene — itself a SymbolItem, exported as the root armature. */

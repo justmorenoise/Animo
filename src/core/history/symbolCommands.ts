@@ -446,6 +446,8 @@ export class DuplicateLibraryItem implements Command {
     }
 
     const symbol = createSymbol(this.name);
+    // Next to the original, as the image branch does by copying every field.
+    if (source.folderId) symbol.folderId = source.folderId;
     const idMap = new Map<NodeId, NodeId>();
     for (const id of Object.keys(source.nodes)) idMap.set(id as NodeId, newNodeId());
     const layerMap = new Map<LayerId, LayerId>();

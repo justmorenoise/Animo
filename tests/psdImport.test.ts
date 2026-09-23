@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { buildPsdImport, planBounds, type PsdPlan } from "@/core/doc/psdImport";
 import { newAssetId } from "@/core/doc/ids";
 import { resolveAlpha } from "@/io/import/psdReader";
+import { parsePsd, type PsdRaw } from "@/io/import/psdParse";
 import { isImage, isSymbol, type SymbolItem } from "@/core/doc/types";
 
 function img(name: string, x: number, y: number, w = 10, h = 10, visible = true): PsdPlan {
@@ -191,6 +192,24 @@ describe.skipIf(!existsSync(FIXTURE))("PSD import, against a real file", () => {
           },
     );
   }
+
+  it("parsePsd (the worker's code) encodes every layer with its own box", async () => {
+    const psd = await readFixture();
+    const { readPsd } = await import("ag-psd");
+    const buf = readFileSync(FIXTURE);
+    const encoded: Array<{ w: number; h: number; bytes: number }> = [];
+    const doc = await parsePsd(
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer, readPsd,
+      async (data, w, h) => { encoded.push({ w, h, bytes: data.length }); return new Blob([data]); },
+    );
+    expect([doc.width, doc.height]).toEqual([psd.width, psd.height]);
+    const images: PsdRaw[] = [];
+    const walk = (l: PsdRaw[]) => l.forEach((n) => (n.kind === "group" ? walk(n.children) : images.push(n)));
+    walk(doc.children);
+    expect(images).toHaveLength(13);
+    expect(encoded).toHaveLength(13);
+    for (const e of encoded) expect(e.bytes).toBe(e.w * e.h * 4);
+  });
 
   it("rebuilds the frog's structure and positions", async () => {
     const psd = await readFixture();

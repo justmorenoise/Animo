@@ -85,6 +85,19 @@ npx tsc --noEmit   # typecheck alone; faster than a build while iterating
   option needs a default that reproduces what was written before it.
 - **A gesture that re-parents goes through `mayReparent`**, which refuses bones
   the IK solves unless the user turned the refusal off.
+- **A transaction notifies once**, when it closes (`History.transaction`).
+  Code inside one must not wait for a `doc` event to see its own changes.
+- **No browser `prompt`/`confirm`/`alert`**: `view/widgets/dialogs.ts`
+  (promises; re-check the target after the await). A step that can take over
+  half a second runs under `busy(label, report => …)` and reports progress
+  (ARCHITECTURE ▸ Dialogs and the progress card).
+- **Library keys belong to the focused list** (ARCHITECTURE ▸ Folders and
+  keys): it stops the keys it handles, so the stage never sees them. Folders
+  are organisation only; names stay unique across the library.
+- **Heavy pixel work runs on a worker** (`io/workers/`, see ARCHITECTURE ▸ Off
+  the main thread) and falls back to the page on `WorkerCrashed`. The logic
+  stays in a DOM-free module the worker imports (`resampleRgba`, `parsePsd`), so
+  vitest tests it directly.
 
 ## Licensing
 

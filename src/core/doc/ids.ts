@@ -8,6 +8,7 @@ export type LayerId = Brand<string, "LayerId">;
 export type AnimId = Brand<string, "AnimId">;
 export type IkId = Brand<string, "IkId">;
 export type AssetId = Brand<string, "AssetId">;
+export type FolderId = Brand<string, "FolderId">;
 
 /**
  * Seedable id generator. Deterministic by default so exporter golden files
@@ -28,6 +29,7 @@ export const newLayerId = () => next("l") as LayerId;
 export const newAnimId = () => next("a") as AnimId;
 export const newIkId = () => next("k") as IkId;
 export const newAssetId = () => next("s") as AssetId;
+export const newFolderId = () => next("f") as FolderId;
 
 /** For deserialisation: keep the counter ahead of every id already in use. */
 export function observeId(id: string): void {

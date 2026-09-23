@@ -20,6 +20,8 @@ export interface GeneralPrefs {
   confirmDiscard: boolean;
   /** Refuse to re-parent a bone the IK solves (see `ikDrivenAmong`). */
   guardIkReparent: boolean;
+  /** Ask before Delete removes library items and folders. */
+  confirmLibraryDelete: boolean;
   /** Defaults for File ▸ New — not the current document. */
   newDocWidth: number;
   newDocHeight: number;
@@ -136,6 +138,7 @@ export const DEFAULT_PREFS: Prefs = {
     autosaveSeconds: 30,
     confirmDiscard: true,
     guardIkReparent: true,
+    confirmLibraryDelete: true,
     newDocWidth: 800,
     newDocHeight: 600,
     newDocFps: 24,

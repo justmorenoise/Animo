@@ -187,6 +187,14 @@
 .lib-row .ico { width: 13px; height: 13px; flex: none; color: var(--fg-dim); }
 .lib-row.selected .ico { color: var(--accent-row-ink); }
 .lib-row .use { color: var(--fg-dim); text-align: right; font-variant-numeric: tabular-nums; }
+.lib-twisty { width: 9px; flex: none; color: var(--fg-dim); font-size: var(--fs-sm); text-align: center; cursor: default; }
+.lib-row.selected .lib-twisty { color: var(--accent-row-ink); }
+.lib-row .nm input { flex: 1 1 auto; min-width: 0; height: calc(16px * var(--ui-scale)); }
+.lib-row.drop-into { box-shadow: inset 0 0 0 1px var(--accent); }
+.lib-list.drop-root { box-shadow: inset 0 0 0 1px var(--accent); }
+.lib-list:focus { outline: none; }
+/* Selected rows read as inactive while the library does not have the keys. */
+.lib-list:not(:focus-within) .lib-row.selected { background: color-mix(in srgb, var(--accent-row) 55%, var(--bg-panel)); }
 .lib-row.selected .use { color: rgba(255,255,255,0.8); }
 
 .lib-preview {
@@ -340,6 +348,35 @@
   pointer-events: none;
 }
 .toast.error { background: #6e2f2c; border-color: #8a3a36; color: #ffd9d6; }
+
+/* ── Busy card ── see view/widgets/Busy.ts ─────────────────────────────── */
+.busy {
+  position: fixed;
+  right: 16px;
+  bottom: 26px;
+  z-index: 2100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.busy[hidden] { display: none; }
+.busy-row { display: flex; flex-direction: column; gap: 5px; }
+.busy-label { color: var(--fg-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.busy-track { position: relative; height: 4px; overflow: hidden; background: var(--bg-sunken); border-radius: 2px; }
+.busy-bar { height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width 0.15s linear; }
+.busy-bar.indeterminate { position: absolute; width: 35%; transition: none; animation: busy-sweep 1.1s ease-in-out infinite; }
+@keyframes busy-sweep { from { left: -35%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .busy-bar.indeterminate { animation: none; left: 0; width: 100%; opacity: 0.5; }
+}
 
 /* ── Recovery bar ───────────────────────────────────────────────────────── */
 .recovery {

@@ -65,18 +65,23 @@ const CATEGORIES: Category[] = [
         ],
       },
       {
-        title: "Bones and IK", rows: [
-          { kind: "check", cat: "general", key: "guardIkReparent", label: "Refuse to re-parent bones the IK solves" },
-          { kind: "note", text: "Re-parenting keeps a bone where it looks, and a solved bone looks the way the IK bends it: that bend would be written into its rest pose, and the exported IK would bend it again on top." },
-        ],
-      },
-      {
         title: "New documents", rows: [
           { kind: "number", cat: "general", key: "newDocWidth", label: "Width", unit: "px" },
           { kind: "number", cat: "general", key: "newDocHeight", label: "Height", unit: "px" },
           { kind: "number", cat: "general", key: "newDocFps", label: "Frame rate", unit: "fps" },
           { kind: "color", cat: "general", key: "newDocBackground", label: "Background" },
           { kind: "note", text: "Used by File ▸ New. To change the open document, click an empty spot on the stage and edit it in the Properties panel." },
+        ],
+      },
+      {
+        title: "Bones and IK", rows: [
+          { kind: "check", cat: "general", key: "guardIkReparent", label: "Refuse to re-parent bones the IK solves" },
+          { kind: "note", text: "Re-parenting keeps a bone where it looks, and a solved bone looks the way the IK bends it: that bend would be written into its rest pose, and the exported IK would bend it again on top." },
+        ],
+      },
+      {
+        title: "Library", rows: [
+          { kind: "check", cat: "general", key: "confirmLibraryDelete", label: "Ask before deleting library items" },
         ],
       },
     ],

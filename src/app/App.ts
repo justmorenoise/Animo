@@ -23,7 +23,7 @@ import { openAbout } from "@/view/help/AboutDialog";
 import { APP_NAME } from "@/core/about";
 import { StagePlay } from "@/view/viewport/StagePlay";
 import { TimelinePanel } from "@/view/timeline/TimelinePanel";
-import { buildExport, bundleZip, exportFiles, safeFileName } from "@/io/export/ExportBundle";
+import { buildExport, bundleZip, exportFiles, exportSettingsOf, safeFileName } from "@/io/export/ExportBundle";
 import {
     type FileRef,
     hasDirectoryPicker,
@@ -41,7 +41,6 @@ import { Clipboard } from "./Clipboard";
 import {
     AddNode,
     type MaskState,
-    RemoveLibraryItem,
     RemoveNodes,
     RenameLibraryItem,
     ReplaceImageAsset,
@@ -72,6 +71,10 @@ import type { AssetId, ItemId, LayerId, NodeId } from "@/core/doc/ids";
 import { cloneTf, type Transform } from "@/core/math/Transform";
 import { applyVec, mat } from "@/core/math/Matrix2D";
 import { moveBy, snapshotOf, topmostSelected } from "@/view/tools/transformOps";
+import { alertDialog, confirmDialog, promptText } from "@/view/widgets/dialogs";
+import { AtlasTooSmall, oversizeAdvice } from "@/core/atlas/oversize";
+import { busy } from "@/view/widgets/Busy";
+import { phase } from "./busy";
 
 export class App {
   readonly store: Store;
@@ -112,7 +115,7 @@ export class App {
       (itemId, x, y) => this.libraryMenu(itemId, x, y),
       (message, isError) => this.toast.show(message, isError),
     );
-    this.previewSession = new PreviewSession(this.store, this.assets);
+    this.previewSession = new PreviewSession(this.store, this.assets, (err) => this.previewBuilt(err));
     this.preview = new PreviewPanel(
       this.previewSession,
       () => this.shell.floatPanel("preview"),
@@ -136,6 +139,12 @@ export class App {
       this.assets,
       {
         onStatus: (msg, isError) => this.toast.show(msg, isError),
+        confirmDiscard: () => confirmDialog({
+          title: "Unsaved changes",
+          message: `${this.project.fileName} has changes that are not saved. Discard them?`,
+          ok: "Discard", cancel: "Keep Editing", danger: true,
+        }),
+        busy,
         onLoaded: (diagnostics) => {
           for (const d of diagnostics) {
             (d.severity === "error" ? console.error : console.warn)(`[Project] ${d.path}: ${d.message}`);
@@ -347,28 +356,26 @@ export class App {
         label: "Replace Image…", enabled: isImage(item),
         run: () => void this.replaceImage(itemId),
       },
+      { label: "New Folder", run: () => this.library.newFolder() },
       "-",
       {
+        // Enabled even when used: the panel says where it is used.
         label: usage > 0 ? `Delete (used ${usage}×)` : "Delete",
-        enabled: usage === 0 && itemId !== s.project.rootSymbolId,
-        run: () => {
-          s.apply(new RemoveLibraryItem(itemId));
-          s.selectItems([]);
-          s.emit("library");
-        },
+        enabled: itemId !== s.project.rootSymbolId,
+        run: () => void this.library.deleteItem(itemId),
       },
     ]);
   }
 
-  private renameLibraryItem(itemId: ItemId): void {
+  private async renameLibraryItem(itemId: ItemId): Promise<void> {
     const item = this.store.project.items[itemId];
     if (!item) return;
-    const name = prompt("Name", item.name)?.trim();
-    if (!name || name === item.name) return;
-    if (RenameLibraryItem.clashes(this.store.project, itemId, name)) {
-      this.toast.show(`Another library item is already called "${name}"`, true);
-      return;
-    }
+    const name = await promptText({
+      title: "Rename", label: "Name", value: item.name, ok: "Rename",
+      validate: (text) => text !== item.name && RenameLibraryItem.clashes(this.store.project, itemId, text)
+        ? `Another library item is already called "${text}".` : null,
+    });
+    if (!name || name === item.name || this.store.project.items[itemId] !== item) return;
     this.store.apply(new RenameLibraryItem(itemId, name));
     this.store.emit("library");
     this.store.emit("doc");
@@ -386,7 +393,7 @@ export class App {
   /* ── Symbols ───────────────────────────────────────────────────────────*/
 
   /** Wrap the selection into a reusable Symbol, leaving one instance behind. */
-  convertToSymbol(): void {
+  async convertToSymbol(): Promise<void> {
     const ids = [...this.store.selection.nodes];
     const problem = ConvertToSymbol.validate(this.store.project, this.store.currentSymbolId, ids);
     if (problem) { this.toast.show(problem, true); return; }
@@ -394,8 +401,11 @@ export class App {
     const suggested = uniqueSymbolName(this.store, ids.length === 1
       ? this.store.node(ids[0]!)?.name ?? "Symbol"
       : "Symbol");
-    const name = prompt("Symbol name", suggested)?.trim();
+    const name = await promptText({ title: "Convert to Symbol", label: "Name", value: suggested, ok: "Convert" });
     if (!name) return;
+    // The dialog is not modal to the document's timers: check again.
+    const late = ConvertToSymbol.validate(this.store.project, this.store.currentSymbolId, ids);
+    if (late) { this.toast.show(late, true); return; }
 
     const cmd = new ConvertToSymbol(this.store.currentSymbolId, ids, name);
     this.store.apply(cmd);
@@ -405,8 +415,10 @@ export class App {
     this.toast.show(`Created symbol "${name}"`);
   }
 
-  newSymbol(): void {
-    const name = prompt("Symbol name", uniqueSymbolName(this.store, "Symbol"))?.trim();
+  async newSymbol(): Promise<void> {
+    const name = await promptText({
+      title: "New Symbol", label: "Name", value: uniqueSymbolName(this.store, "Symbol"), ok: "Create",
+    });
     if (!name) return;
     const cmd = new AddSymbol(name);
     this.store.apply(cmd);
@@ -685,13 +697,13 @@ export class App {
     if (hasNativeFiles()) {
       target = await pickSaveLocation(suggested, PNG_TYPE, "animo-png");
     } else {
-      const name = prompt("PNG file name", suggested);
+      const name = await promptText({ title: "Export PNG", label: "File name", value: suggested, ok: "Export" });
       target = name ? { name: name.endsWith(".png") ? name : `${name}.png` } : null;
     }
     if (!target) return;
 
     try {
-      const blob = await this.library.renderItemPng(itemId);
+      const blob = await busy(`Exporting ${target.name}`, () => this.library.renderItemPng(itemId));
       if (!blob) {
         this.toast.show(`"${item.name}" has nothing to draw`, true);
         return;
@@ -767,22 +779,26 @@ export class App {
     if (hasNativeFiles()) {
       target = await pickSaveLocation(suggested, ZIP_TYPE, "animo-export");
     } else {
-      const name = prompt("Export file name", suggested);
+      const name = await promptText({ title: "Export DragonBones", label: "File name", value: suggested, ok: "Export" });
       target = name ? { name: name.endsWith(".zip") ? name : `${name}.zip` } : null;
     }
     if (!target) return;                        // cancelled
+    const file = target;
 
-    const result = await this.buildForExport();
-    if (!result) return;
-    try {
-      await writeFile(target, await bundleZip(result));
-      this.toast.show(
-        `Exported ${target.name} (${result.pages.length} atlas page(s))` +
-        (result.extensions ? ` with extensions ${result.extensions.extensionsUsed.join(", ")}` : ""),
-      );
-    } catch (err) {
-      this.reportExportFailure(err);
-    }
+    await busy(`Exporting ${file.name}`, async (report) => {
+      const result = await this.buildForExport(phase(report, 0, 0.8));
+      if (!result) return;
+      try {
+        await writeFile(file, await bundleZip(result));
+        report(1);
+        this.toast.show(
+          `Exported ${file.name} (${result.pages.length} atlas page(s))` +
+          (result.extensions ? ` with extensions ${result.extensions.extensionsUsed.join(", ")}` : ""),
+        );
+      } catch (err) {
+        this.reportExportFailure(err);
+      }
+    });
   }
 
   /**
@@ -800,26 +816,32 @@ export class App {
     const dir = await pickDirectory("animo-export");
     if (!dir) return;                           // cancelled
 
-    const result = await this.buildForExport();
-    if (!result) return;
-    try {
-      const files = await exportFiles(result);
-      for (const [name, bytes] of Object.entries(files)) {
-        await writeIntoDirectory(dir, name, new Blob([bytes as unknown as BlobPart]));
+    await busy(`Exporting to ${dir.name}`, async (report) => {
+      const result = await this.buildForExport(phase(report, 0, 0.8));
+      if (!result) return;
+      try {
+        const files = await exportFiles(result);
+        const names = Object.keys(files);
+        for (const [n, name] of names.entries()) {
+          await writeIntoDirectory(dir, name, new Blob([files[name] as unknown as BlobPart]));
+          report(0.8 + 0.2 * (n + 1) / names.length);
+        }
+        this.toast.show(
+          `Exported ${names.length} file(s) to ${dir.name}` +
+          (result.extensions ? ". README.md explains the extensions" : ""),
+        );
+      } catch (err) {
+        this.reportExportFailure(err);
       }
-      this.toast.show(
-        `Exported ${Object.keys(files).length} file(s) to ${dir.name}` +
-        (result.extensions ? ". README.md explains the extensions" : ""),
-      );
-    } catch (err) {
-      this.reportExportFailure(err);
-    }
+    });
   }
 
   /** Shared front half: build, report diagnostics, refuse on errors. */
-  private async buildForExport(): Promise<Awaited<ReturnType<typeof buildExport>> | null> {
+  private async buildForExport(
+    report: (fraction: number) => void,
+  ): Promise<Awaited<ReturnType<typeof buildExport>> | null> {
     try {
-      const result = await buildExport(this.store.project, this.assets);
+      const result = await buildExport(this.store.project, this.assets, undefined, report);
       for (const d of result.diagnostics) {
         (d.severity === "error" ? console.error : console.warn)(`[Export] ${d.message}`);
       }
@@ -836,9 +858,33 @@ export class App {
   }
 
   private reportExportFailure(err: unknown): void {
+    if (err instanceof AtlasTooSmall) { void this.explainAtlasTooSmall(err); return; }
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[Export] Failed:", err);
     this.toast.show(`Export failed: ${msg}`, true);
+  }
+
+  /** The problem the last explanation was about, so the preview, which
+   *  rebuilds after every edit, explains each problem once. */
+  private explainedAtlas: string | null = null;
+
+  private previewBuilt(err: unknown): void {
+    if (!(err instanceof AtlasTooSmall)) {
+      if (err === null) this.explainedAtlas = null;
+      return;
+    }
+    const key = JSON.stringify([err.offenders, err.page]);
+    if (key === this.explainedAtlas) return;
+    this.explainedAtlas = key;
+    void this.explainAtlasTooSmall(err);
+  }
+
+  private explainAtlasTooSmall(err: AtlasTooSmall): Promise<void> {
+    const advice = oversizeAdvice(err.offenders, exportSettingsOf(this.store.project));
+    return alertDialog({
+      title: advice.title, message: advice.message, width: 460,
+      extra: { label: "Export Settings…", run: () => openExportSettings(this.store) },
+    });
   }
 
   /**

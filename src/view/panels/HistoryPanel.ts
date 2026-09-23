@@ -1,6 +1,7 @@
 import { clear, h, on } from "@/view/widgets/dom";
 import type { Panel } from "@/view/widgets/Dock";
 import type { Store } from "@/app/Store";
+import { confirmDialog } from "@/view/widgets/dialogs";
 
 /**
  * The list of edits, oldest at the top, and a way back to any of them.
@@ -27,7 +28,7 @@ export class HistoryPanel implements Panel {
 
     this.countLabel = h("span", { class: "hist-count" });
     const revert = h("button", { class: "textbtn", title: "Undo everything since the document was opened" }, "Revert");
-    on(revert, "click", () => this.store.revertToOpened());
+    on(revert, "click", () => void this.revert());
     this.footer = h("div", { class: "pfooter" }, this.countLabel, h("div", { class: "spacer" }), revert);
 
     // Any document change reorders the list, and so does travelling in it.
@@ -62,6 +63,24 @@ export class HistoryPanel implements Panel {
     this.list.querySelector(".hist-row.current")?.scrollIntoView({ block: "nearest" });
   }
 
+  /**
+   * While every step is still listed, revert is a walk back and redo undoes
+   * it. Once steps have been trimmed it swaps the opened copy in and history
+   * restarts: that cannot be taken back, so it asks.
+   */
+  private async revert(): Promise<void> {
+    if (!this.store.history.reachesStart) {
+      const ok = await confirmDialog({
+        title: "Revert",
+        message: "The oldest steps are no longer in the history, so this cannot be undone. " +
+          "Go back to the document as it was opened?",
+        ok: "Revert", danger: true,
+      });
+      if (!ok) return;
+    }
+    this.store.revertToOpened();
+  }
+
   /** One step. Rows past the current position are the redoable future. */
   private row(label: string, at: number, position: number, extra = ""): HTMLElement {
     const state = at === position ? " current" : at > position ? " future" : "";
@@ -69,7 +88,7 @@ export class HistoryPanel implements Panel {
       h("span", { class: "lbl" }, label),
     );
     on(row, "click", () => {
-      if (at === 0 && !this.store.history.reachesStart) this.store.revertToOpened();
+      if (at === 0 && !this.store.history.reachesStart) void this.revert();
       else this.store.goToHistory(at);
     });
     return row;

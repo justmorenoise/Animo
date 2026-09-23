@@ -1,4 +1,5 @@
 import { clear, cls, drag, h, on } from "@/view/widgets/dom";
+import { promptText } from "@/view/widgets/dialogs";
 import { onAccelChange, withAccel } from "@/view/widgets/accel";
 import { icon } from "@/view/icons";
 import type { Panel } from "@/view/widgets/Dock";
@@ -495,23 +496,29 @@ export class TimelinePanel implements Panel {
     this.store.emit("timeline");
   }
 
-  private renameAnimation(): void {
+  private async renameAnimation(): Promise<void> {
     const anim = this.store.currentAnimation;
     if (!anim) return;
-    const name = prompt("Animation name", anim.name);
-    if (!name?.trim()) return;
-    this.store.apply(new RenameAnimation(this.store.currentSymbolId, anim.id, name.trim()));
+    const symbolId = this.store.currentSymbolId;
+    const name = await promptText({ title: "Rename Animation", label: "Name", value: anim.name, ok: "Rename" });
+    if (!name || name === anim.name) return;
+    if (!this.store.project.items[symbolId] || this.store.currentAnimation?.id !== anim.id) return;
+    this.store.apply(new RenameAnimation(symbolId, anim.id, name));
     this.store.emit("timeline");
   }
 
   private setDuration(): void {
     const anim = this.store.currentAnimation;
     if (!anim) return;
-    const value = prompt("Duration in frames", String(anim.duration));
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 1) return;
-    this.store.apply(new SetAnimationDuration(this.store.currentSymbolId, anim.id, n));
-    this.store.emit("timeline");
+    const symbolId = this.store.currentSymbolId;
+    promptNumber({
+      title: "Animation Duration", label: "Frames", value: anim.duration, min: 1, max: 100000,
+      onOk: (n) => {
+        if (this.store.currentAnimation?.id !== anim.id || !Number.isFinite(n) || n < 1) return;
+        this.store.apply(new SetAnimationDuration(symbolId, anim.id, Math.round(n)));
+        this.store.emit("timeline");
+      },
+    });
   }
 
   /** A 0×0 fixed anchor at a screen point, for `showMenu`. */

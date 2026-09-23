@@ -37,6 +37,7 @@ export class History {
   private txDepth = 0;
   private txLabel = "";
   private txParts: Command[] = [];
+  private txTouches: TouchSet | null = null;
 
   private interactionKind: string | null = null;
   private interactionEntry: HistoryEntry | null = null;
@@ -85,7 +86,9 @@ export class History {
       command.apply(this.project);
       this.settle();
       this.txParts.push(command);
-      this.emit(command.touches, "apply");
+      // Listeners hear the transaction once, when it closes: a PSD import
+      // applies dozens of commands, and redrawing after each froze the page.
+      this.txTouches = mergeTouches(this.txTouches ?? {}, command.touches);
       return;
     }
 
@@ -187,6 +190,9 @@ export class History {
             selectionAfter: this.readSelection(),
           });
         }
+        const touches = this.txTouches;
+        this.txTouches = null;
+        if (touches) this.emit(touches, "apply");
       }
     }
   }

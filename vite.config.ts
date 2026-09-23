@@ -21,6 +21,9 @@ export default defineConfig({
   // this config's define) can fall back — see `core/about.ts`.
   define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   server: { port: 5180, open: false },
+  // ES workers can share chunks with the page (the resampler, ag-psd) and
+  // load their own imports on demand; the IIFE default cannot split.
+  worker: { format: "es" },
   build: {
     target: "es2022",
     sourcemap: true,

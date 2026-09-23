@@ -1,4 +1,5 @@
-import { strToU8, zipSync } from "fflate";
+import { strToU8 } from "fflate";
+import { zipFiles } from "@/io/zip";
 import type { Project } from "@/core/doc/types";
 import { type ImageItem, isImage } from "@/core/doc/types";
 import type { AssetStore } from "@/app/AssetStore";
@@ -32,6 +33,7 @@ export async function buildExport(
   project: Project,
   assets: AssetStore,
   opts: AtlasOptions = atlasOptionsFor(exportSettingsOf(project)),
+  onProgress?: (fraction: number) => void,
 ): Promise<ExportResult> {
   const exported = exportSkeleton(project);
   const { skeleton, diagnostics, usedImages } = exported;
@@ -47,7 +49,7 @@ export async function buildExport(
   const fileBase = safeFileName(project.name);
   // The atlas `name` must match the skeleton `name`, or the factory will not
   // pair them and the armature builds with no textures at all.
-  const pages = await buildAtlas(items, assets, skeleton.name, fileBase, opts);
+  const pages = await buildAtlas(items, assets, skeleton.name, fileBase, opts, onProgress);
 
   if (items.length === 0) {
     diagnostics.push({
@@ -115,7 +117,7 @@ export async function exportFiles(result: ExportResult): Promise<Record<string, 
 }
 
 export async function bundleZip(result: ExportResult): Promise<Blob> {
-  const zipped = zipSync(await exportFiles(result), { level: 6 });
+  const zipped = await zipFiles(await exportFiles(result));
   return new Blob([zipped as unknown as BlobPart], { type: "application/zip" });
 }
 

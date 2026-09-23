@@ -15,11 +15,16 @@ import {
 } from "@/io/project/FileSystem";
 import { clearRecents, listRecents, type RecentEntry, rememberRecent, } from "@/io/project/Recents";
 import { Autosaver, type AutosaveRecord, clearAutosave, readAutosave, } from "@/io/project/Autosave";
+import { type RunBusy, runQuietly } from "./busy";
 
 export interface ProjectServiceEvents {
   onLoaded?(diagnostics: Diagnostic[]): void;
   onStatus?(message: string, isError?: boolean): void;
   onRecentsChanged?(recents: RecentEntry[]): void;
+  /** Asks before unsaved work is dropped. Without it the work is kept (false). */
+  confirmDiscard?(): Promise<boolean>;
+  /** Runs a slow step under the app's progress indicator. */
+  busy?: RunBusy;
 }
 
 /**
@@ -153,8 +158,9 @@ export class ProjectService {
   private async writeTo(ref: FileRef): Promise<boolean> {
     try {
       const revision = this.store.history.revision;
-      const blob = await serializeProject(this.store.project, this.assets);
-      await writeFile(ref, blob);
+      await this.busy(`Saving ${ref.name}`, async () => {
+        await writeFile(ref, await serializeProject(this.store.project, this.assets));
+      });
       if (this.store.history.revision === revision) {
         this.store.history.markSaved();
         // The autosave now holds nothing the file does not; left in place, the
@@ -191,7 +197,8 @@ export class ProjectService {
    */
   async loadFrom(data: ArrayBuffer, ref: FileRef | null, remember = true): Promise<boolean> {
     try {
-      const { project, diagnostics } = await deserializeProject(data, this.assets);
+      const { project, diagnostics } = await this.busy(`Opening ${ref?.name ?? "project"}`,
+        (report) => deserializeProject(data, this.assets, report));
       invalidateBounds();
       this.store.replaceProject(project);
       this.ref = ref;
@@ -245,8 +252,10 @@ export class ProjectService {
   private async confirmDiscard(): Promise<boolean> {
     if (!this.store.history.isDirty) return true;
     if (!this.store.prefs.value.general.confirmDiscard) return true;
-    return confirm("This project has unsaved changes. Discard them?");
+    return (await this.events.confirmDiscard?.()) ?? false;
   }
+
+  private get busy(): RunBusy { return this.events.busy ?? runQuietly; }
 }
 
 function safeName(name: string): string {
