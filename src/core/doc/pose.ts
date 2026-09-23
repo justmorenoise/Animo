@@ -1,4 +1,4 @@
-import { clone, determinant, mat, type Matrix2D, mul } from "@/core/math/Matrix2D";
+import { applyInverse, clone, determinant, mat, type Matrix2D, mul } from "@/core/math/Matrix2D";
 import { type IkWorld, matrixToWorld, solveOneBone, solveTwoBones, worldToMatrix, } from "@/core/math/ik";
 import { cloneTf, toMatrix, type Transform } from "@/core/math/Transform";
 import type { Animation, ColorTransform, DisplayRef, Node, Project, SymbolItem } from "./types";
@@ -380,6 +380,18 @@ export function isEmptySymbolInstance(project: Project, display: DisplayRef | nu
   return b.w === 0 && b.h === 0;
 }
 
+/**
+ * A point in the symbol's space, expressed where `node`'s own position lives:
+ * its parent's space. Placing something at a pointer inside a moved or
+ * rotated group has to go through this, or it lands offset by the group.
+ */
+export function pointInParent(pose: Pose, node: Node, x: number, y: number): { x: number; y: number } {
+  const parent = node.parentId ? pose.byNode.get(node.parentId)?.world : undefined;
+  const out = { x, y };
+  if (parent && !applyInverse(out, parent, x, y)) return { x, y };
+  return out;
+}
+
 /** World matrix of one node, or null when it is not in the pose. */
 export function worldOf(pose: Pose, nodeId: NodeId): Matrix2D | null {
   const e = pose.byNode.get(nodeId);
@@ -409,6 +421,15 @@ export function displaySize(project: Project, node: Node, display = 0): { w: num
  * updates".
  */
 const boundsCache = new Map<string, { w: number; h: number; x: number; y: number }>();
+/** The cache keys holding each item's bounds, so invalidating one item does
+ *  not scan the whole cache. */
+const keysByItem = new Map<ItemId, Set<string>>();
+/** Library item -> the symbols whose cached bounds were measured through it.
+ *  Editing a symbol, or replacing an image, changes the bounds of everything
+ *  that contains it. */
+const usedBy = new Map<ItemId, Set<ItemId>>();
+/** Scrubbing a timeline adds a key per frame; the oldest go first. */
+const BOUNDS_CACHE_MAX = 512;
 
 /** Cache key: bounds move with the frame once a symbol animates internally. */
 function boundsKey(id: ItemId, ctx: FrameContext): string {
@@ -417,12 +438,38 @@ function boundsKey(id: ItemId, ctx: FrameContext): string {
   return `${id}|${animation}|${ctx.frame}`;
 }
 
+function remember(id: ItemId, key: string, bounds: { w: number; h: number; x: number; y: number }): void {
+  if (boundsCache.size >= BOUNDS_CACHE_MAX) {
+    const oldest = boundsCache.keys().next().value!;
+    boundsCache.delete(oldest);
+    keysByItem.get(oldest.slice(0, oldest.indexOf("|")) as ItemId)?.delete(oldest);
+  }
+  boundsCache.set(key, bounds);
+  let keys = keysByItem.get(id);
+  if (!keys) keysByItem.set(id, (keys = new Set()));
+  keys.add(key);
+}
+
+/** Drop the cached bounds of `ids` and of every symbol containing them;
+ *  everything without `ids`. */
 export function invalidateBounds(ids?: ItemId[]): void {
-  if (!ids) { boundsCache.clear(); return; }
-  for (const id of ids) {
-    for (const key of boundsCache.keys()) {
-      if (key.startsWith(`${id}|`)) boundsCache.delete(key);
-    }
+  if (!ids) {
+    boundsCache.clear();
+    keysByItem.clear();
+    usedBy.clear();
+    return;
+  }
+  const queue = [...ids];
+  const seen = new Set<ItemId>();
+  while (queue.length) {
+    const id = queue.pop()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const key of keysByItem.get(id) ?? []) boundsCache.delete(key);
+    keysByItem.delete(id);
+    const parents = usedBy.get(id);
+    usedBy.delete(id);
+    if (parents) queue.push(...parents);
   }
 }
 
@@ -446,6 +493,11 @@ export function symbolBounds(
     if (!e.display) continue;
     const item = project.items[e.display.itemId];
     let w = 0, h = 0, ox = 0, oy = 0;
+    if (item) {
+      let parents = usedBy.get(item.id);
+      if (!parents) usedBy.set(item.id, (parents = new Set()));
+      parents.add(id);
+    }
     if (isImage(item)) { w = item.width; h = item.height; }
     else if (isSymbol(item)) {
       const b = symbolBounds(project, item.id, displayContext(inner, e.displaySince), depth + 1);
@@ -467,8 +519,6 @@ export function symbolBounds(
   const out = Number.isFinite(minX)
     ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
     : empty;
-  // Scrubbing a timeline generates a key per frame; keep it bounded.
-  if (boundsCache.size > 512) boundsCache.clear();
-  boundsCache.set(key, out);
+  remember(id, key, out);
   return out;
 }

@@ -14,6 +14,7 @@ import type { ToolContext } from "@/view/tools/Tool";
 import { buildGizmo, type Gizmo, type PoseAt, selectionBounds } from "@/view/tools/gizmo";
 import { onionFrames } from "@/core/doc/onion";
 import { keyIndexAt } from "@/core/doc/timeline";
+import { withDescendants } from "@/core/doc/layerTree";
 import { GhostPainter } from "./ghost";
 import { type OverlayColors, resolveColors } from "./overlayColors";
 import { type SnapLine, snapMove, type SnapTargets, snapValue } from "@/core/math/snap";
@@ -845,7 +846,10 @@ export class Viewport {
     if (!store.ui.snap || !sp.enabled || !pose) return;
 
     const base = this.camera.base;
-    const ids = new Set(moving) as Set<NodeId>;
+    // What moves with the drag, children included: they are the selection's
+    // edges (a group or a bone has no artwork of its own) and must not be
+    // targets, or the drag catches on where its own contents started.
+    const ids = new Set(withDescendants(store.currentSymbol, [...moving] as NodeId[]));
     const when = this.frameContext;
     const refs = selectionRefs(store.project, pose, base, ids, when);
     if (refs.xs.length === 0) return;

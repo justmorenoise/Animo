@@ -3,7 +3,8 @@ import type { Project } from "@/core/doc/types";
 import { type ImageItem, isImage } from "@/core/doc/types";
 import type { AssetStore } from "@/app/AssetStore";
 import { type ExportDiagnostic, exportSkeleton } from "@/core/export/exportSkeleton";
-import { type AtlasOptions, type AtlasPage, buildAtlas, DEFAULT_ATLAS } from "@/io/atlas/AtlasBuilder";
+import { type AtlasOptions, atlasOptionsFor, type AtlasPage, buildAtlas } from "@/io/atlas/AtlasBuilder";
+import { DEFAULT_EXPORT_SETTINGS, type ExportSettings } from "@/core/export/settings";
 import type { DbSkeleton } from "@/core/export/dbTypes";
 import type { ExtensionManifest } from "@/runtime/animo-pixi";
 import { buildExtensionManifest, extensionReadme, RUNTIME_FILE, } from "@/core/export/extensions";
@@ -18,16 +19,19 @@ export interface ExportResult {
   diagnostics: ExportDiagnostic[];
   /** Null when nothing needs an extension, so the common bundle is unchanged. */
   extensions: ExtensionManifest | null;
+  /** Write the JSON files without indentation. */
+  minifyJson?: boolean;
 }
 
 /**
  * Produces everything a DragonBones runtime needs: `<name>_ske.json`,
- * one `<name>_tex.json` + `<name>_tex.png` per atlas page.
+ * one `<name>_tex.json` + `<name>_tex.png` (or `.webp`) per atlas page, as the
+ * document's export settings ask.
  */
 export async function buildExport(
   project: Project,
   assets: AssetStore,
-  opts: AtlasOptions = DEFAULT_ATLAS,
+  opts: AtlasOptions = atlasOptionsFor(exportSettingsOf(project)),
 ): Promise<ExportResult> {
   const exported = exportSkeleton(project);
   const { skeleton, diagnostics, usedImages } = exported;
@@ -35,6 +39,10 @@ export async function buildExport(
   const items = usedImages
     .map((id) => project.items[id])
     .filter((i): i is ImageItem => isImage(i));
+
+  // Before the atlas await, like the skeleton: an edit made while the pages
+  // render must not give the manifest a different document than the skeleton.
+  const extensions = buildExtensionManifest(project, exported);
 
   const fileBase = safeFileName(project.name);
   // The atlas `name` must match the skeleton `name`, or the factory will not
@@ -48,7 +56,6 @@ export async function buildExport(
     });
   }
 
-  const extensions = buildExtensionManifest(project, exported);
   if (extensions) {
     const required = extensions.extensionsUsed.filter((n) => extensions.extensionsRequired.includes(n));
     const optional = extensions.extensionsUsed.filter((n) => !extensions.extensionsRequired.includes(n));
@@ -70,33 +77,39 @@ export async function buildExport(
     }
   }
 
-  return { fileBase, skeleton, pages, diagnostics, extensions };
+  return { fileBase, skeleton, pages, diagnostics, extensions, minifyJson: exportSettingsOf(project).minifyJson };
+}
+
+/** The document's export settings, the defaults when it has none. */
+export function exportSettingsOf(project: Project): ExportSettings {
+  return project.exportSettings ?? { ...DEFAULT_EXPORT_SETTINGS };
 }
 
 /** Canonical JSON: stable key order and fixed rounding, so exports diff cleanly. */
-export function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown, minify = false): string {
   return JSON.stringify(value, (_k, v) => {
     if (typeof v === "number") {
       const r = Math.round(v * 10000) / 10000;
       return Object.is(r, -0) ? 0 : r;
     }
     return v;
-  }, 2);
+  }, minify ? undefined : 2);
 }
 
 /** Every exported file by name, shared by the zip and the folder export. */
 export async function exportFiles(result: ExportResult): Promise<Record<string, Uint8Array>> {
   const files: Record<string, Uint8Array> = {};
-  files[`${result.fileBase}_ske.json`] = strToU8(canonicalJson(result.skeleton));
+  const min = result.minifyJson === true;
+  files[`${result.fileBase}_ske.json`] = strToU8(canonicalJson(result.skeleton, min));
   if (result.extensions) {
     const armature = result.skeleton.armature[result.skeleton.armature.length - 1]?.name ?? "";
-    files[`${result.fileBase}_ext.json`] = strToU8(canonicalJson(result.extensions));
+    files[`${result.fileBase}_ext.json`] = strToU8(canonicalJson(result.extensions, min));
     files[RUNTIME_FILE] = strToU8(runtimeSource);
     files["README.md"] = strToU8(extensionReadme(result.fileBase, armature, result.extensions));
   }
   for (const page of result.pages) {
-    files[`${page.fileStem}.json`] = strToU8(canonicalJson(page.json));
-    files[`${page.fileStem}.png`] = new Uint8Array(await page.blob.arrayBuffer());
+    files[`${page.fileStem}.json`] = strToU8(canonicalJson(page.json, min));
+    files[`${page.fileStem}.${page.ext}`] = new Uint8Array(await page.blob.arrayBuffer());
   }
   return files;
 }

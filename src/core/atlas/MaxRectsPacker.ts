@@ -143,11 +143,15 @@ class MaxRectsBin {
     private readonly opts: PackOptions,
     private readonly hardMax = { w: opts.maxWidth, h: opts.maxHeight },
   ) {
+    // Every item claims its size plus ONE padding (after it), so the free
+    // area starts after the leading padding and runs to the page edge.
+    // Subtracting the padding at both ends as well refused an image that
+    // fits with its padding on each side.
     const p = opts.padding;
     this.free = [{
       x: p, y: p,
-      width: opts.maxWidth - p * 2,
-      height: opts.maxHeight - p * 2,
+      width: opts.maxWidth - p,
+      height: opts.maxHeight - p,
     }];
   }
 

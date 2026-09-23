@@ -34,6 +34,9 @@ export async function serializeProject(project: Project, assets: AssetStore): Pr
 
   // Only assets the document actually references — importing and deleting
   // should not leave weight behind in every future save.
+  // Taken before the first await: an edit landing while the images are read
+  // must not reach a project.json whose image list was already fixed.
+  const json = JSON.stringify(project, null, 2);
   const used = new Set<AssetId>();
   for (const item of Object.values(project.items)) {
     if (isImage(item)) used.add(item.assetId);
@@ -47,7 +50,7 @@ export async function serializeProject(project: Project, assets: AssetStore): Pr
     manifest.assets[id] = path;
   }
 
-  files["project.json"] = strToU8(JSON.stringify(project, null, 2));
+  files["project.json"] = strToU8(json);
   files["manifest.json"] = strToU8(JSON.stringify(manifest, null, 2));
 
   // Images are already compressed; storing them again just costs time.

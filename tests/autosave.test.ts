@@ -45,6 +45,31 @@ describe("autosave", () => {
   });
 });
 
+describe("autosave and the preferences", () => {
+  it("a preference write does not throw away the pending save", async () => {
+    const { a, snapshot } = saver();
+    a.start();
+    a.touch();
+    await vi.advanceTimersByTimeAsync(1_000);
+    a.start();                       // what every preference write reaches
+    a.setInterval(30_000);           // unchanged period
+    await vi.advanceTimersByTimeAsync(600);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    a.stop();
+  });
+
+  it("a new period keeps the pending save too", async () => {
+    const { a, snapshot } = saver();
+    a.start();
+    a.touch();
+    await vi.advanceTimersByTimeAsync(1_000);
+    a.setInterval(60_000);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    a.stop();
+  });
+});
+
 describe("dirty state", () => {
   it("can be marked unsaved without a step, as recovered work is", () => {
     const history = new History(createProject("R"));

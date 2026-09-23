@@ -105,3 +105,12 @@ describe("clampPref", () => {
     expect(clampPref("stage.gridColor", 12)).toBe(12);
   });
 });
+
+describe("the IK re-parent guard preference", () => {
+  it("is on by default and survives a stored false", async () => {
+    const { mergePrefs, DEFAULT_PREFS } = await import("@/core/prefs/prefs");
+    expect(DEFAULT_PREFS.general.guardIkReparent).toBe(true);
+    expect(mergePrefs({ general: { guardIkReparent: false } }).general.guardIkReparent).toBe(false);
+    expect(mergePrefs({ general: {} }).general.guardIkReparent).toBe(true);
+  });
+});

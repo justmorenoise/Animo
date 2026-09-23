@@ -177,6 +177,45 @@ describe("schema validation", () => {
     expect(diagnostics.some((d) => /looped back/.test(d.message))).toBe(true);
   });
 
+  it("cuts only the loop, not a node whose chain runs into it", () => {
+    const { p, sym, n } = base();
+    const [b, c] = ["b", "c"].map((name, i) => {
+      const x = createNode("group", name, {});
+      sym.nodes[x.id] = x;
+      sym.layers.push(createLayer(x.id, name, i + 1));
+      return x;
+    });
+    n.parentId = b!.id;                      // a → b → c → b
+    b!.parentId = c!.id;
+    c!.parentId = b!.id;
+
+    const { project } = validateProject(p);
+    const root = project.items[project.rootSymbolId] as SymbolItem;
+    expect(root.nodes[n.id]!.parentId).toBe(b!.id);
+    expect([root.nodes[b!.id]!.parentId, root.nodes[c!.id]!.parentId].filter(Boolean)).toHaveLength(1);
+  });
+
+  it("lengthens an animation its tracks run past", () => {
+    const { p, sym, n } = base();
+    const anim = sym.animations[0]!;
+    anim.duration = 30;
+    anim.tracks[n.id] = {
+      nodeId: n.id, endFrame: 50,
+      keys: [{ frame: 0, transform: tf(), displayIndex: 0, tween: TWEEN_LINEAR }],
+    };
+    const { project, diagnostics } = validateProject(p);
+    expect((project.items[project.rootSymbolId] as SymbolItem).animations[0]!.duration).toBe(51);
+    expect(diagnostics.some((d) => /now lasts 51/.test(d.message))).toBe(true);
+  });
+
+  it("says so when it clears a mask link", () => {
+    const { p, sym, n } = base();
+    sym.layers[0]!.maskedBy = "gone" as never;
+    const { diagnostics } = validateProject(p);
+    expect(sym.layers.find((l) => l.nodeId === n.id)!.maskedBy).toBeUndefined();
+    expect(diagnostics.some((d) => /mask setting/.test(d.message))).toBe(true);
+  });
+
   it("gives an armature with no animations one, so it can still play", () => {
     const { p, sym } = base();
     sym.animations = [];

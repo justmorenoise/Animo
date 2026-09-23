@@ -5,9 +5,9 @@ import { AddNode } from "@/core/history/commands";
 import { ikRoles } from "@/core/doc/ikGraph";
 import { applyTransforms } from "@/app/TimelineOps";
 import { SetBoneLength } from "@/core/history/ikCommands";
-import { fromMatrix, tf } from "@/core/math/Transform";
+import { fromMatrix, tf, toMatrix } from "@/core/math/Transform";
 import { invert, mat, matOf, type Matrix2D, mul } from "@/core/math/Matrix2D";
-import { boneSegment, pickBoneTip } from "./boneGeom";
+import { boneSegment, localLength, pickBoneTip } from "./boneGeom";
 
 /**
  * The Bone tool: drag to lay down a bone, drag again from its tip to chain.
@@ -33,7 +33,7 @@ export class BoneTool implements Tool {
     const pose = ctx.pose();
     if (!pose) return;
     const world = ctx.toWorld(e);
-    const near = pickBoneTip(pose, world, 8 / ctx.camera.screenScale);
+    const near = pickBoneTip(pose, world, 8 / ctx.camera.screenScale, pickable(ctx));
     ctx.setCursor(near ? "alias" : "crosshair");
   }
 
@@ -48,7 +48,7 @@ export class BoneTool implements Tool {
     let ax = world.x;
     let ay = world.y;
 
-    const tip = pose ? pickBoneTip(pose, world, tolerance) : null;
+    const tip = pose ? pickBoneTip(pose, world, tolerance, pickable(ctx)) : null;
     if (tip) {
       const entry = pose!.byNode.get(tip)!;
       const segment = boneSegment(entry);
@@ -162,9 +162,12 @@ export class BoneTool implements Tool {
     // track, showed nothing happen. A bone the IK solver drives is never
     // keyed, so there only its length changes.
     const driven = store.ui.mode === "animate" && ikRoles(store.currentSymbol).driven.has(id);
+    // The drag is measured on the stage; the bone stores its own units.
+    const aimed = toMatrix(mat(), next);
+    const boneWorld = driven ? entry.world : parentEntry ? mul(mat(), parentEntry.world, aimed) : aimed;
     store.transaction("Aim Bone", () => {
       if (!driven) applyTransforms(store, new Map([[id, next]]));
-      store.apply(new SetBoneLength(store.currentSymbolId, new Map([[id, length]])));
+      store.apply(new SetBoneLength(store.currentSymbolId, new Map([[id, localLength(length, boneWorld)]])));
     });
     store.emit("doc");
   }
@@ -184,6 +187,13 @@ function localFromWorld(world: Matrix2D, parent?: Matrix2D): Matrix2D {
   const inverse = mat();
   if (!invert(inverse, parent)) return world;
   return mul(mat(), inverse, world);
+}
+
+/** Locked and hidden layers take no gesture, here as in every other tool. */
+function pickable(ctx: ToolContext): (id: NodeId) => boolean {
+  const blocked = new Set(ctx.store.currentSymbol.layers
+    .filter((l) => l.locked || !l.visible).map((l) => l.nodeId));
+  return (id) => !blocked.has(id);
 }
 
 function uniqueBoneName(store: { currentSymbol: { nodes: Record<string, { name: string }> } }): string {

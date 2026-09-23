@@ -244,7 +244,9 @@ export class PropertiesPanel implements Panel {
 
     const write = (next: ColorTransform, committing: boolean) => {
       this.scrubStep("node.color", committing);
-      applyColors(this.store, new Map(ids.map((id) => [id, next])), !committing);
+      // The commit belongs to the scrub's entry: a different kind on the last
+      // step left a second undo step that restored the same colour.
+      applyColors(this.store, new Map(ids.map((id) => [id, next])), this.store.history.inInteraction);
       this.store.emit("stage");
       this.store.emit("timeline");
       if (committing) this.store.history.endInteraction();

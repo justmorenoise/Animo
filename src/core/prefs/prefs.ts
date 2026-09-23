@@ -18,6 +18,8 @@ export interface GeneralPrefs {
   autosave: boolean;
   autosaveSeconds: number;
   confirmDiscard: boolean;
+  /** Refuse to re-parent a bone the IK solves (see `ikDrivenAmong`). */
+  guardIkReparent: boolean;
   /** Defaults for File ▸ New — not the current document. */
   newDocWidth: number;
   newDocHeight: number;
@@ -133,6 +135,7 @@ export const DEFAULT_PREFS: Prefs = {
     autosave: true,
     autosaveSeconds: 30,
     confirmDiscard: true,
+    guardIkReparent: true,
     newDocWidth: 800,
     newDocHeight: 600,
     newDocFps: 24,

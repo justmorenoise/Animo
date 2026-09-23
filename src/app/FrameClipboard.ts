@@ -1,6 +1,6 @@
 import type { Store } from "./Store";
-import type { DisplayRef, Keyframe, Node, Track } from "@/core/doc/types";
-import { newNodeId, type NodeId } from "@/core/doc/ids";
+import type { DisplayRef, Keyframe, Node, Project, Track } from "@/core/doc/types";
+import { type ItemId, newNodeId, type NodeId } from "@/core/doc/ids";
 import { createLayer } from "@/core/doc/defaults";
 import { cloneTf } from "@/core/math/Transform";
 import { TWEEN_NONE } from "@/core/math/easing";
@@ -14,9 +14,10 @@ import {
     SetPivot
 } from "@/core/history/commands";
 import { ensureTrack } from "./TimelineOps";
-import { insertKeyframe, keyIndexAt, pasteRun, removeFrame, spanIndexAt } from "@/core/doc/timeline";
+import { emptyRange, insertKeyframe, keyIndexAt, pasteRun, removeFrame, spanIndexAt } from "@/core/doc/timeline";
 import { layerRows } from "@/core/doc/layerTree";
-import { displaysOf, findOrAddDisplay, kindOfItem } from "@/core/doc/displays";
+import { displaysOf, findOrAddDisplay, itemsOf, kindOfItem } from "@/core/doc/displays";
+import { wouldCreateCycle } from "@/core/history/symbolCommands";
 
 /** A rectangle of frames: rows top to bottom, `from..to` on each. */
 export interface FrameSelection {
@@ -43,6 +44,15 @@ interface FrameClip {
 export type PasteMode = "insert" | "overwrite";
 
 /**
+ * Would laying down rows copied from these nodes put a symbol inside itself?
+ * A row brings its node's whole display list along — onto an empty layer, a
+ * new one, or appended to the destination's — so every display counts.
+ */
+export function rowsNestHost(project: Project, hostId: ItemId, nodes: readonly Node[]): boolean {
+  return nodes.some((n) => itemsOf(n).some((id) => wouldCreateCycle(project, hostId, id)));
+}
+
+/**
  * Copy, cut and paste runs of frames, over one layer or several.
  *
  * A frame carries its content, as in Flash: what the layer shows there comes
@@ -56,6 +66,9 @@ export class FrameClipboard {
 
   get hasContent(): boolean { return (this.clip?.rows.length ?? 0) > 0; }
   get span(): number { return this.clip?.span ?? 0; }
+
+  /** Forget the clip when the document is replaced (see `Clipboard.reset`). */
+  reset(): void { this.clip = null; }
 
   /** The rectangle currently selected, rows in stack order. */
   static selectionOf(store: Store): FrameSelection | null {
@@ -146,6 +159,9 @@ export class FrameClipboard {
     const anim = store.currentAnimation;
     const sym = store.currentSymbol;
     if (!anim) return 0;
+    // The same guard as every other way into a symbol: frames copied at the
+    // top level and pasted inside the symbol they show would nest it in itself.
+    if (rowsNestHost(store.project, store.currentSymbolId, clip.rows.map((r) => r.node))) return 0;
 
     let rows = layerRows(sym).map((r) => r.node);
     if (!rows.some((n) => n.id === target)) rows = layerRows(sym, true).map((r) => r.node);
@@ -277,34 +293,21 @@ function buildClip(store: Store, sel: FrameSelection): FrameClip | null {
 }
 
 /**
- * The source rows with a dragged range taken out, which is not what Cut Frames
- * does: the frames a drag moves away become EMPTY, so a row that was showing
- * something from before the range gets a blank key at `from` rather than
- * holding that pose across the gap, and a range that reached the track's end
- * takes the span with it.
+ * The source rows with a dragged range taken out (`emptyRange`). A layer that
+ * was never keyed still shows its artwork on every frame, so it is given its
+ * track first — skipping it turned a move into a copy. A group or an empty
+ * layer nobody keyed has no frames of its own to move.
  */
 function cutRange(store: Store, sel: FrameSelection): Map<NodeId, Track> {
   const anim = store.currentAnimation;
   const out = new Map<NodeId, Track>();
   if (!anim) return out;
   for (const id of sel.nodeIds) {
-    const track = anim.tracks[id];
     const node = store.currentSymbol.nodes[id];
-    if (!track || !node) continue;
-    if (sel.from > track.endFrame) continue;              // nothing there to take
-    const keys = track.keys.filter((k) => k.frame < sel.from || k.frame > sel.to);
-    const before = keys.some((k) => k.frame < sel.from);
-    const after = keys.some((k) => k.frame > sel.to);
-    let endFrame = track.endFrame;
-    if (before && (after || sel.to < track.endFrame)) {
-      const next = keys.findIndex((k) => k.frame > sel.to);
-      keys.splice(next < 0 ? keys.length : next, 0, {
-        frame: sel.from, transform: cloneTf(node.bind), displayIndex: -1, tween: TWEEN_NONE,
-      });
-    } else if (!after) {
-      endFrame = before ? sel.from - 1 : -1;
-    }
-    out.set(id, { ...track, keys, endFrame });
+    if (!node) continue;
+    const track = anim.tracks[id] ?? (node.itemId ? ensureTrack(store, node) : undefined);
+    const emptied = track ? emptyRange(track, sel.from, sel.to, node) : null;
+    if (emptied) out.set(id, emptied);
   }
   return out;
 }

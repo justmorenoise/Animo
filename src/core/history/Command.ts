@@ -31,6 +31,21 @@ export interface Command {
   estimateSize?(): number;
 }
 
+/**
+ * Fold a follow-up step's `before` into a merged command. An id only the later
+ * step touched was still untouched when that step ran, so its value there is
+ * the original, and undo has to put it back. Returns the ids it added.
+ */
+export function adoptBefore<K, V>(into: Map<K, V>, from: ReadonlyMap<K, V>): K[] {
+  const added: K[] = [];
+  for (const [id, v] of from) {
+    if (into.has(id)) continue;
+    into.set(id, v);
+    added.push(id);
+  }
+  return added;
+}
+
 export function mergeTouches(a: TouchSet, b: TouchSet): TouchSet {
   const uniq = <T,>(x?: T[], y?: T[]) =>
     x || y ? Array.from(new Set([...(x ?? []), ...(y ?? [])])) : undefined;

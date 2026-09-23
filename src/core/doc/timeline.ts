@@ -229,6 +229,32 @@ export function setEndFrame(track: Track, endFrame: number): Track {
   return withKeys(track, track.keys, Math.max(endFrame, last));
 }
 
+/**
+ * The length of an animation with no tracks at all after inserting
+ * (`delta` > 0) or removing (`delta` < 0) frames at `from`. Inserting past the
+ * end reaches out to `from`, as F5 on frame 100 of a fresh timeline makes a
+ * hundred frames; removing takes only the frames that exist, the way
+ * `removeFrame` stops at a track's end.
+ */
+export function resizedEmptyLength(duration: number, from: number, delta: number): number {
+  if (delta > 0) return Math.max(duration, from) + delta;
+  const removable = Math.max(0, Math.min(-delta, duration - from));
+  return Math.max(1, duration - removable);
+}
+
+/**
+ * Where a track's span ends once the animation goes from `from` to `to` frames.
+ * A span that reached the old end follows the new one; a span that stopped
+ * earlier keeps its end unless the new end cuts it — a layer that leaves the
+ * stage at frame 10 must not come back because the animation grew. Never
+ * before the last key.
+ */
+export function endAfterResize(track: Track, from: number, to: number): number {
+  const lastKey = track.keys[track.keys.length - 1]?.frame ?? 0;
+  const end = Math.max(lastKey, to - 1);
+  return track.endFrame >= from - 1 ? end : Math.min(track.endFrame, end);
+}
+
 /** Move one keyframe, refusing collisions and never moving frame 0's anchor. */
 export function moveKeyframe(track: Track, from: number, to: number): Track | null {
   if (from === to || to < 0) return null;
@@ -252,6 +278,30 @@ export function moveRange(track: Track, from: number, to: number, delta: number)
   const staying = track.keys.filter((k) => !inRange(k.frame) && !landed.has(k.frame));
   const keys = [...staying, ...moving.map((k) => ({ ...k, frame: k.frame + delta }))];
   return withKeys(track, keys, Math.max(track.endFrame, to + delta));
+}
+
+/**
+ * `from..to` of a track emptied, which is what a frame drag leaves behind and
+ * not what Cut Frames does: a row showing something from before the range
+ * gets a blank key at `from` rather than holding that pose across the gap,
+ * and a range that reached the end takes the span with it. The frames AFTER
+ * the range keep what they showed — a key goes in at `to + 1` first, cut like
+ * Edit Multiple Frames cuts, or the blank key would govern them too. Null
+ * when the range lies past the track.
+ */
+export function emptyRange(track: Track, from: number, to: number, node: Node): Track | null {
+  if (from > track.endFrame) return null;
+  const t = to + 1 <= track.endFrame ? cutKeepingEase(track, to + 1, node) ?? track : track;
+  const keys = t.keys.filter((k) => k.frame < from || k.frame > to);
+  const before = keys.some((k) => k.frame < from);
+  const after = keys.some((k) => k.frame > to);
+  let endFrame = t.endFrame;
+  if (before && after) {
+    keys.push({ frame: from, transform: cloneTf(node.bind), displayIndex: -1, tween: TWEEN_NONE });
+  } else if (!after) {
+    endFrame = before ? from - 1 : -1;
+  }
+  return withKeys(t, keys, endFrame);
 }
 
 /* ── Edit Multiple Frames ────────────────────────────────────────────────*/

@@ -25,6 +25,9 @@ export class NumberField {
   private opts: NumberFieldOpts;
   /** The text `set` last wrote, so an untouched field commits nothing. */
   private shown = "";
+  /** Showing "—" for a multi-selection that disagrees: `value` is stale then,
+   *  so a typed number must commit even when it happens to equal it. */
+  private mixed = false;
 
   constructor(opts: NumberFieldOpts = {}) {
     this.opts = opts;
@@ -42,7 +45,10 @@ export class NumberField {
     on(this.input, "keydown", (ev) => {
       const e = ev as unknown as KeyboardEvent;
       if (e.key === "Enter") { this.commitText(); this.input.blur(); }
-      else if (e.key === "Escape") { this.set(this.value); this.input.blur(); }
+      else if (e.key === "Escape") {
+        if (this.mixed) this.setMixed(); else this.set(this.value);
+        this.input.blur();
+      }
       else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
         e.preventDefault();
         const mult = e.shiftKey ? 10 : 1;
@@ -101,11 +107,12 @@ export class NumberField {
     const parsed = parseExpression(this.input.value);
     if (parsed === null) { this.set(this.value); return; }
     const before = this.value;
+    const wasMixed = this.mixed;
     this.set(parsed);
     // Leaving a field untouched is not an edit. Committing anyway emitted a
     // document change on every blur, which rebuilt the export and reloaded
     // the preview just for clicking from one field to the next.
-    if (this.value === before) return;
+    if (this.value === before && !wasMixed) return;
     this.opts.onInput?.(this.value, true);
   }
 
@@ -114,6 +121,7 @@ export class NumberField {
     if (this.opts.min !== undefined) next = Math.max(this.opts.min, next);
     if (this.opts.max !== undefined) next = Math.min(this.opts.max, next);
     this.value = next;
+    this.mixed = false;
     const d = this.opts.decimals ?? 2;
     this.input.value = this.shown = trimZeros(next.toFixed(d));
   }
@@ -139,7 +147,10 @@ export class NumberField {
   }
 
   /** Show a blank field for a mixed multi-selection. */
-  setMixed(): void { this.input.value = this.shown = "—"; }
+  setMixed(): void {
+    this.input.value = this.shown = "—";
+    this.mixed = true;
+  }
 }
 
 function trimZeros(s: string): string {

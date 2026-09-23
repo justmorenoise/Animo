@@ -370,8 +370,10 @@ describe("dragging frames to a new location", () => {
     const clip = new FrameClipboard();
     clip.dragTo(store, { nodeIds: [a.id], from: 0, to: 10 }, b.id, 0);
 
-    // The source starts empty now: its first key is the one after the run.
-    expect(at(store, a.id)).toEqual([[20, 0], [30, 0]]);
+    // The source starts empty now. Frames 11..19 were not moved and keep
+    // what they showed — the tween from 10 towards 20 — through a key at 11.
+    expect(at(store, a.id)).toEqual([[11, 0], [20, 0], [30, 0]]);
+    expect(store.currentAnimation!.tracks[a.id]!.keys[0]!.transform.x).toBeCloseTo(11, 9);
     expect(evaluateSymbol(sym, store.currentAnimation, 5).byNode.get(a.id)!.visible).toBe(false);
     // B keeps its own frames outside the run and takes A's inside it.
     expect(at(store, b.id)).toEqual([[0, 0], [10, 0], [20, 0], [30, 0]]);
@@ -409,3 +411,70 @@ describe("dragging frames to a new location", () => {
     expect(at(store, b.id)).toEqual(before);
   });
 });
+
+describe("frame clipboard, symbols inside themselves", () => {
+  it("refuses to paste frames showing a symbol into that symbol", async () => {
+    const { createSymbol } = await import("@/core/doc/defaults");
+    const { rowsNestHost } = await import("@/app/FrameClipboard");
+    const { store } = scene([{ f: 0, y: 0 }]);
+    const project = store.project;
+    const sym = createSymbol("S");
+    project.items[sym.id] = sym;
+    project.itemOrder.push(sym.id);
+    const root = store.currentSymbol;
+    const inst = createNode("symbol", "inst", { itemId: sym.id });
+    root.nodes[inst.id] = inst;
+    root.layers.push(createLayer(inst.id, "inst", 1));
+
+    expect(rowsNestHost(project, sym.id, [inst])).toBe(true);
+    expect(rowsNestHost(project, root.id, [inst])).toBe(false);
+
+    const clip = new FrameClipboard();
+    store.selection = { ...store.selection, frames: [`${inst.id}:0`] };
+    expect(clip.copy(store)).toBe(1);
+    const empty = createNode("empty", "slot");
+    sym.nodes[empty.id] = empty;
+    sym.layers.push(createLayer(empty.id, "slot", 0));
+    store.openSymbol(sym.id);
+    expect(clip.paste(store, empty.id, 0)).toBe(0);
+    expect(Object.keys(sym.nodes)).toEqual([empty.id]);
+    expect(sym.nodes[empty.id]!.itemId).toBeUndefined();
+  });
+});
+
+describe("dragging frames leaves the rest alone", () => {
+  it("frames after the range keep showing what they showed", () => {
+    const { store, n } = scene([{ f: 0, y: 0 }, { f: 20, y: 200 }]);
+    const sym = store.currentSymbol;
+    const other = createNode("group", "other");
+    sym.nodes[other.id] = other;
+    sym.layers.push(createLayer(other.id, "other", 1));
+    const y = (f: number) => evaluateSymbol(sym, store.currentAnimation, f).byNode.get(n.id)!;
+    const before = [11, 15, 19].map((f) => y(f).local.y);
+
+    new FrameClipboard().dragTo(store, { nodeIds: [n.id], from: 5, to: 10 }, other.id, 0);
+    expect(y(7).visible).toBe(false);                    // moved away: empty
+    [11, 15, 19].forEach((f, i) => {
+      expect(y(f).visible).toBe(true);
+      expect(y(f).local.y).toBeCloseTo(before[i]!, 9);
+    });
+  });
+
+  it("a never-keyed layer is emptied by a move, not copied", () => {
+    const { store } = scene([{ f: 0, y: 0 }]);
+    const sym = store.currentSymbol;
+    const img = createImageItem("img", "a1" as AssetId, 10, 10);
+    store.project.items[img.id] = img;
+    const art = createNode("image", "art", { itemId: img.id });
+    const dest = createNode("empty", "dest");
+    for (const x of [art, dest]) { sym.nodes[x.id] = x; sym.layers.push(createLayer(x.id, x.name, 2)); }
+    store.currentAnimation!.duration = 24;              // as `durationFor` keeps it
+
+    new FrameClipboard().dragTo(store, { nodeIds: [art.id], from: 0, to: 9 }, dest.id, 0);
+    const pose = (f: number) => evaluateSymbol(sym, store.currentAnimation, f).byNode;
+    expect(pose(3).get(art.id)!.visible).toBe(false);
+    expect(pose(3).get(dest.id)!.visible).toBe(true);
+    expect(pose(15).get(art.id)!.visible).toBe(true);     // outside the range: still there
+  });
+});
+

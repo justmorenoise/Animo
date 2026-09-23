@@ -81,7 +81,9 @@ export class PreviewPanel implements Panel, PreviewView {
 
   // ── PreviewView ────────────────────────────────────────────────────────
 
-  active(): boolean { return this.mounted; }
+  /** On screen: a tab in the background or a closed panel is detached by the
+   *  dock, and rebuilding the export for it cost every edit an atlas pack. */
+  active(): boolean { return this.mounted && this.el.isConnected; }
   options(): { debugDraw: boolean; showStage: boolean; play: boolean } {
     return { debugDraw: this.debugDraw, showStage: this.showStage, play: this.playing };
   }

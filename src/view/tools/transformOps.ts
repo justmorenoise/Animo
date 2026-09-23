@@ -163,7 +163,7 @@ export function scaleLocal(a: LocalScaleArgs): Transform {
   let sy = Math.abs(spanY) > 1e-6 ? (q.y - A.y) / spanY : 1;
 
   if (a.uniform) {
-    const s = Math.max(Math.abs(sx), Math.abs(sy));
+    const s = uniformFactor(sx, sy, Math.abs(spanX) > 1e-6, Math.abs(spanY) > 1e-6);
     if (Math.abs(spanX) > 1e-6) sx = Math.sign(sx || 1) * s;
     if (Math.abs(spanY) > 1e-6) sy = Math.sign(sy || 1) * s;
   }
@@ -179,6 +179,17 @@ export function scaleLocal(a: LocalScaleArgs): Transform {
   t.x = anchorParent.x - (lin.a * A.x + lin.c * A.y);
   t.y = anchorParent.y - (lin.b * A.x + lin.d * A.y);
   return t;
+}
+
+/**
+ * The one factor a ⇧-scale applies: the larger change among the axes the
+ * handle actually drags. An edge handle drags one axis, and the idle one
+ * (always 1) used to win every shrink, so ⇧ on an edge could only grow.
+ */
+export function uniformFactor(sx: number, sy: number, dragsX: boolean, dragsY: boolean): number {
+  if (dragsX && !dragsY) return Math.abs(sx);
+  if (dragsY && !dragsX) return Math.abs(sy);
+  return Math.max(Math.abs(sx), Math.abs(sy));
 }
 
 /* ── Skew, single selection ──────────────────────────────────────────────
@@ -209,8 +220,11 @@ export function skewLocal(
     const k = (dir * (q.x - q0.x)) / span;
     const c = m0.a * k + m0.c;
     const d = m0.b * k + m0.d;
-    t.scaleY = clampScale(Math.sign(snap.local.scaleY || 1) * Math.hypot(c, d));
-    t.skewX = nearestAngle(Math.atan2(-c, d) * RAD_DEG, snap.local.skewX);
+    // The column carries the scale's sign; read the angle with it divided
+    // out, or a flipped object turns half a turn and un-flips.
+    const sign = Math.sign(snap.local.scaleY || 1);
+    t.scaleY = clampScale(sign * Math.hypot(c, d));
+    t.skewX = nearestAngle(Math.atan2(-c * sign, d * sign) * RAD_DEG, snap.local.skewX);
   } else {
     // Vertical drag tilts the horizontal sides -> local X axis -> skewY.
     const span = Math.max(1e-6, box.w);
@@ -218,8 +232,9 @@ export function skewLocal(
     const k = (dir * (q.y - q0.y)) / span;
     const aa = m0.a + m0.c * k;
     const bb = m0.b + m0.d * k;
-    t.scaleX = clampScale(Math.sign(snap.local.scaleX || 1) * Math.hypot(aa, bb));
-    t.skewY = nearestAngle(Math.atan2(bb, aa) * RAD_DEG, snap.local.skewY);
+    const sign = Math.sign(snap.local.scaleX || 1);
+    t.scaleX = clampScale(sign * Math.hypot(aa, bb));
+    t.skewY = nearestAngle(Math.atan2(bb * sign, aa * sign) * RAD_DEG, snap.local.skewY);
   }
 
   // Keep the opposite edge pinned, as Flash does.

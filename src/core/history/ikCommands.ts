@@ -1,4 +1,4 @@
-import type { Command, TouchSet } from "./Command";
+import { adoptBefore, type Command, type TouchSet } from "./Command";
 import type { IkConstraint, Project, SymbolItem } from "@/core/doc/types";
 import { isSymbol } from "@/core/doc/types";
 import type { ItemId, NodeId } from "@/core/doc/ids";
@@ -130,11 +130,14 @@ export class SetBoneLength implements Command {
   readonly touches: TouchSet;
   readonly label = "Bone Length";
   private before = new Map<NodeId, number>();
+  /** Own copy: a merge writes into it, and the caller's map is not ours. */
+  private readonly lengths: Map<NodeId, number>;
 
   constructor(
     private readonly symbolId: ItemId,
-    private readonly lengths: Map<NodeId, number>,
+    lengths: ReadonlyMap<NodeId, number>,
   ) {
+    this.lengths = new Map(lengths);
     this.touches = { symbols: [symbolId], nodes: [...lengths.keys()], stage: true };
   }
 
@@ -166,6 +169,7 @@ export class SetBoneLength implements Command {
 
   mergeWith(next: Command): boolean {
     if (!(next instanceof SetBoneLength) || next.symbolId !== this.symbolId) return false;
+    this.touches.nodes?.push(...adoptBefore(this.before, next.before));
     for (const [id, len] of next.lengths) this.lengths.set(id, len);
     return true;
   }

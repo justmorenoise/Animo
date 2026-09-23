@@ -1,5 +1,5 @@
 import type { Command, TouchSet } from "./Command";
-import type { Animation, Layer, LibraryItem, Node, Project, SymbolItem, Track, } from "@/core/doc/types";
+import type { Animation, IkConstraint, Layer, LibraryItem, Node, Project, SymbolItem, Track, } from "@/core/doc/types";
 import { isSymbol } from "@/core/doc/types";
 import { itemsOf } from "@/core/doc/displays";
 import type { ItemId, LayerId, NodeId } from "@/core/doc/ids";
@@ -13,7 +13,9 @@ import {
     normalizeLayerOrder,
     normalizeMasks,
 } from "@/core/doc/layerTree";
-import { apply } from "@/core/math/Matrix2D";
+import { apply, applyInverse } from "@/core/math/Matrix2D";
+import type { Transform } from "@/core/math/Transform";
+import { reexpress } from "./commands";
 
 /**
  * Would placing `inserted` inside `host` close a loop?
@@ -52,6 +54,134 @@ export function symbolDepth(project: Project, id: ItemId, depth = 0): number {
   return deepest;
 }
 
+/** What Convert to Symbol does to a host, decided without touching it. */
+export interface ConvertPlan {
+  /** The selection with every descendant: whole subtrees move. */
+  moving: Set<NodeId>;
+  /** Moving nodes whose parent does not move. */
+  roots: NodeId[];
+  /** Where the instance goes: the roots' shared parent, or the top level. */
+  parent: NodeId | null;
+  /** The instance's position, in `parent`'s space. */
+  origin: { x: number; y: number };
+  /** Each root's bind pose inside the new symbol. */
+  binds: Map<NodeId, Transform>;
+  /** Each root's keys inside the new symbol, per host animation id. */
+  keys: Map<string, Map<NodeId, Track>>;
+  /** Constraints whose bone and target both move, in host order. */
+  ik: IkConstraint[];
+}
+
+/**
+ * Decide a conversion. Pure: reads the project, returns what to write.
+ *
+ * Roots that share a parent keep their values, shifted by the origin in that
+ * parent's space. Roots under DIFFERENT parents cannot share one, so each is
+ * re-expressed at the top level from the world matrix it has at the bind pose
+ * and at every one of its keys, as `SetParent` does — cutting the parent link
+ * and keeping the local values moved them by their parent's whole transform.
+ */
+export function convertPlan(p: Project, host: SymbolItem, ids: readonly NodeId[]): ConvertPlan | null {
+  const moving = new Set<NodeId>();
+  for (const id of ids) {
+    if (!host.nodes[id]) continue;
+    moving.add(id);
+    for (const child of descendantsOf(host, id)) moving.add(child);
+  }
+  if (moving.size === 0) return null;
+
+  const roots = [...moving].filter((id) => {
+    const parent = host.nodes[id]?.parentId;
+    return !parent || !moving.has(parent);
+  });
+  const firstParent = host.nodes[roots[0]!]?.parentId ?? null;
+  const shared = roots.every((id) => (host.nodes[id]?.parentId ?? null) === firstParent);
+  const parent = shared ? firstParent : null;
+
+  const setup = evaluateSymbol(host, null, 0, "setup");
+  const centre = registrationPoint(p, host, roots, setup);
+  const parentWorld = parent ? setup.byNode.get(parent)?.world : undefined;
+  const origin = { ...centre };
+  if (parentWorld && !applyInverse(origin, parentWorld, centre.x, centre.y)) {
+    origin.x = centre.x;
+    origin.y = centre.y;
+  }
+  const shift = (t: Transform): Transform => ({ ...t, x: t.x - origin.x, y: t.y - origin.y });
+  const lifted = (id: NodeId) => !shared && !!host.nodes[id]?.parentId;
+
+  const binds = new Map<NodeId, Transform>();
+  for (const id of roots) {
+    const node = host.nodes[id]!;
+    const world = setup.byNode.get(id)?.world;
+    binds.set(id, shift(lifted(id) && world ? reexpress(world, undefined, node.bind) : node.bind));
+  }
+
+  const keys = new Map<string, Map<NodeId, Track>>();
+  for (const anim of host.animations) {
+    const out = new Map<NodeId, Track>();
+    const poses = new Map<number, ReturnType<typeof evaluateSymbol>>();
+    const poseAt = (f: number) => {
+      let pose = poses.get(f);
+      if (!pose) poses.set(f, (pose = evaluateSymbol(host, anim, f, "animate")));
+      return pose;
+    };
+    for (const id of roots) {
+      const track = anim.tracks[id];
+      if (!track) continue;
+      out.set(id, {
+        ...track,
+        keys: track.keys.map((k) => {
+          const world = lifted(id) ? poseAt(k.frame).byNode.get(id)?.world : undefined;
+          return { ...k, transform: shift(world ? reexpress(world, undefined, k.transform) : k.transform) };
+        }),
+      });
+    }
+    keys.set(anim.id, out);
+  }
+
+  const ik = host.ik.filter((k) => moving.has(k.boneId) && moving.has(k.targetId));
+  return { moving, roots, parent, origin, binds, keys, ik };
+}
+
+/**
+ * Where the symbol's origin sits, in the host's own space: the centre of the
+ * selection's artwork, so rotating the new instance behaves the way the user
+ * expects.
+ */
+function registrationPoint(
+  p: Project, host: SymbolItem, roots: NodeId[], pose: ReturnType<typeof evaluateSymbol>,
+): { x: number; y: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+  for (const id of roots) {
+    const entry = pose.byNode.get(id);
+    const node = host.nodes[id];
+    if (!entry || !node) continue;
+    const box = localBox(p, node.itemId, node.pivot);
+    if (!box) {
+      minX = Math.min(minX, entry.world.tx); maxX = Math.max(maxX, entry.world.tx);
+      minY = Math.min(minY, entry.world.ty); maxY = Math.max(maxY, entry.world.ty);
+      continue;
+    }
+    for (const [cx, cy] of [
+      [box.x, box.y], [box.x + box.w, box.y],
+      [box.x + box.w, box.y + box.h], [box.x, box.y + box.h],
+    ] as const) {
+      const pt = apply({ x: 0, y: 0 }, entry.world, cx, cy);
+      if (pt.x < minX) minX = pt.x;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+  }
+
+  if (!Number.isFinite(minX)) {
+    const first = pose.byNode.get(roots[0]!)?.world;
+    return { x: Math.round(first?.tx ?? 0), y: Math.round(first?.ty ?? 0) };
+  }
+  return { x: Math.round((minX + maxX) / 2), y: Math.round((minY + maxY) / 2) };
+}
+
 /**
  * Convert a selection into a reusable Symbol, leaving one instance behind.
  *
@@ -76,6 +206,8 @@ export class ConvertToSymbol implements Command {
   private movedLayers: Array<{ layer: Layer; index: number }> = [];
   private movedTracks: Array<{ animId: string; nodeId: NodeId; track: Track }> = [];
   private instanceLayer: Layer | null = null;
+  /** Constraints that moved into the symbol, with their index in the host. */
+  private movedIk: Array<{ constraint: IkConstraint; index: number }> = [];
   private orderIndex = -1;
   /** What normalising the host changed — a mask whose targets all moved is
    *  demoted — undone before anything else. */
@@ -110,27 +242,9 @@ export class ConvertToSymbol implements Command {
     if (!isSymbol(host)) return;
     if (this.symbol) { this.reapply(p, host); return; }
 
-    // Whole subtrees move, never half of one.
-    const moving = new Set<NodeId>();
-    for (const id of this.ids) {
-      if (!host.nodes[id]) continue;
-      moving.add(id);
-      for (const child of descendantsOf(host, id)) moving.add(child);
-    }
-    if (moving.size === 0) return;
-
-    const roots = [...moving].filter((id) => {
-      const parent = host.nodes[id]?.parentId;
-      return !parent || !moving.has(parent);
-    });
-    // Roots that disagree about their parent would need re-expressing; drop to
-    // the top level rather than silently moving them somewhere unexpected.
-    const firstParent = host.nodes[roots[0]!]?.parentId ?? null;
-    const commonParent = roots.every((id) => (host.nodes[id]?.parentId ?? null) === firstParent)
-      ? firstParent
-      : null;
-
-    const origin = this.registrationPoint(p, host, roots);
+    const plan = convertPlan(p, host, this.ids);
+    if (!plan) return;
+    const { moving } = plan;
 
     // Build the new symbol, mirroring the host's animations so tracks have
     // somewhere to land.
@@ -155,35 +269,22 @@ export class ConvertToSymbol implements Command {
     for (const { layer } of this.movedLayers) {
       const node = host.nodes[layer.nodeId]!;
       this.movedNodes.push(node);
-
-      const relocated: Node = { ...node };
-      if (roots.includes(node.id)) {
-        // Only the roots shift: everything below is already relative to its
-        // own parent and comes across unchanged.
-        relocated.parentId = null;
-        relocated.bind = { ...node.bind, x: node.bind.x - origin.x, y: node.bind.y - origin.y };
-      }
-      symbol.nodes[node.id] = relocated;
+      const bind = plan.binds.get(node.id);
+      // Only the roots change: everything below is already relative to its
+      // own parent and comes across unchanged.
+      symbol.nodes[node.id] = bind ? { ...node, parentId: null, bind } : { ...node };
       symbol.layers.push({ ...layer });
     }
 
     for (const anim of host.animations) {
       const target = symbol.animations.find((a) => a.name === anim.name);
+      const rewritten = plan.keys.get(anim.id);
       for (const id of moving) {
         const track = anim.tracks[id];
         if (!track) continue;
         this.movedTracks.push({ animId: anim.id, nodeId: id, track });
         delete anim.tracks[id];
-        if (!target) continue;
-        target.tracks[id] = roots.includes(id)
-          ? {
-              ...track,
-              keys: track.keys.map((k) => ({
-                ...k,
-                transform: { ...k.transform, x: k.transform.x - origin.x, y: k.transform.y - origin.y },
-              })),
-            }
-          : track;
+        if (target) target.tracks[id] = rewritten?.get(id) ?? track;
       }
     }
 
@@ -191,6 +292,13 @@ export class ConvertToSymbol implements Command {
       delete host.nodes[layer.nodeId];
     }
     host.layers = host.layers.filter((l) => !moving.has(l.nodeId));
+
+    // A constraint whose bone and target both moved goes with them; one that
+    // spans the two symbols cannot be expressed and stays behind, where the
+    // exporter reports it.
+    this.movedIk = plan.ik.map((constraint) => ({ constraint, index: host.ik.indexOf(constraint) }));
+    symbol.ik = [...plan.ik];
+    host.ik = host.ik.filter((k) => !plan.ik.includes(k));
 
     // Register the symbol and drop an instance where the selection was.
     p.items[symbol.id] = symbol;
@@ -200,7 +308,7 @@ export class ConvertToSymbol implements Command {
     }
 
     const instance = createNode("symbol", this.name, {
-      itemId: symbol.id, parentId: commonParent, x: origin.x, y: origin.y,
+      itemId: symbol.id, parentId: plan.parent, x: plan.origin.x, y: plan.origin.y,
     });
     const at = this.movedLayers[0]?.index ?? 0;
     const layer = createLayer(instance.id, this.name, host.layers.length);
@@ -232,6 +340,8 @@ export class ConvertToSymbol implements Command {
     }
     for (const id of moving) delete host.nodes[id];
     host.layers = host.layers.filter((l) => !moving.has(l.nodeId));
+    const ik = new Set(this.movedIk.map((m) => m.constraint));
+    host.ik = host.ik.filter((k) => !ik.has(k));
 
     p.items[this.symbol.id] = this.symbol;
     if (!p.itemOrder.includes(this.symbol.id)) p.itemOrder.push(this.symbol.id);
@@ -261,6 +371,9 @@ export class ConvertToSymbol implements Command {
       const anim = host.animations.find((a) => a.id === animId);
       if (anim) anim.tracks[nodeId] = track;
     }
+    for (const { constraint, index } of [...this.movedIk].sort((a, b) => a.index - b.index)) {
+      host.ik.splice(Math.min(index, host.ik.length), 0, constraint);
+    }
 
     delete p.items[this.symbol.id];
     if (this.orderIndex >= 0) p.itemOrder = p.itemOrder.filter((i) => i !== this.symbol!.id);
@@ -269,45 +382,6 @@ export class ConvertToSymbol implements Command {
   }
 
   estimateSize(): number { return this.movedNodes.length * 512 + 256; }
-
-  /**
-   * Where the symbol's origin sits: the centre of the selection's artwork,
-   * so rotating the new instance behaves the way the user expects.
-   */
-  private registrationPoint(
-    p: Project, host: SymbolItem, roots: NodeId[],
-  ): { x: number; y: number } {
-    const pose = evaluateSymbol(host, null, 0, "setup");
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    for (const id of roots) {
-      const entry = pose.byNode.get(id);
-      const node = host.nodes[id];
-      if (!entry || !node) continue;
-      const box = localBox(p, node.itemId, node.pivot);
-      if (!box) {
-        minX = Math.min(minX, entry.world.tx); maxX = Math.max(maxX, entry.world.tx);
-        minY = Math.min(minY, entry.world.ty); maxY = Math.max(maxY, entry.world.ty);
-        continue;
-      }
-      for (const [cx, cy] of [
-        [box.x, box.y], [box.x + box.w, box.y],
-        [box.x + box.w, box.y + box.h], [box.x, box.y + box.h],
-      ] as const) {
-        const pt = apply({ x: 0, y: 0 }, entry.world, cx, cy);
-        if (pt.x < minX) minX = pt.x;
-        if (pt.x > maxX) maxX = pt.x;
-        if (pt.y < minY) minY = pt.y;
-        if (pt.y > maxY) maxY = pt.y;
-      }
-    }
-
-    if (!Number.isFinite(minX)) {
-      const first = host.nodes[roots[0]!];
-      return { x: Math.round(first?.bind.x ?? 0), y: Math.round(first?.bind.y ?? 0) };
-    }
-    return { x: Math.round((minX + maxX) / 2), y: Math.round((minY + maxY) / 2) };
-  }
 }
 
 /** A blank symbol, for building one up from nothing. */

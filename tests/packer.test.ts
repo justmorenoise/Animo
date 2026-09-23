@@ -130,4 +130,36 @@ describe("alpha trimming", () => {
     expect(alphaBounds(d, 4, 4, 10).width).toBe(1);
     expect(alphaBounds(d, 4, 4, 0)).toMatchObject({ x: 1, y: 1, width: 1, height: 1 });
   });
+
+  it("fits an image as wide as the page less its padding on both sides", () => {
+    const opts = { ...DEFAULT_PACK, maxWidth: 256, maxHeight: 256, padding: 2 };
+    const pages = packRects([{ id: "wide", width: 252, height: 252 }], opts);
+    expect(pages).toHaveLength(1);
+    assertValid(pages[0]!, opts.padding);
+    const r = pages[0]!.rects[0]!;
+    expect(r.x).toBeGreaterThanOrEqual(opts.padding);
+    expect(r.x + r.width + opts.padding).toBeLessThanOrEqual(pages[0]!.width);
+    expect(() => packRects([{ id: "wider", width: 253, height: 10 }], { ...opts, allowRotation: false }))
+      .toThrow(/does not fit/);
+  });
+});
+
+
+describe("atlasKey", () => {
+  it("changes with what the pages depend on, and only that", async () => {
+    const { atlasKey, DEFAULT_ATLAS } = await import("@/io/atlas/AtlasBuilder");
+    const { createImageItem } = await import("@/core/doc/defaults");
+    const a = createImageItem("a", "s1" as never, 10, 20);
+    const b = createImageItem("b", "s2" as never, 30, 40);
+    const k = atlasKey([a, b], "rig", "rig", DEFAULT_ATLAS);
+    expect(atlasKey([{ ...a }, { ...b }], "rig", "rig", { ...DEFAULT_ATLAS })).toBe(k);
+    for (const other of [
+      atlasKey([a], "rig", "rig", DEFAULT_ATLAS),
+      atlasKey([{ ...a, name: "a2" }, b], "rig", "rig", DEFAULT_ATLAS),        // SubTexture names
+      atlasKey([{ ...a, assetId: "s9" as never }, b], "rig", "rig", DEFAULT_ATLAS),
+      atlasKey([{ ...a, noTrim: true }, b], "rig", "rig", DEFAULT_ATLAS),
+      atlasKey([a, b], "rig2", "rig", DEFAULT_ATLAS),
+      atlasKey([a, b], "rig", "rig", { ...DEFAULT_ATLAS, padding: 4 }),
+    ]) expect(other).not.toBe(k);
+  });
 });

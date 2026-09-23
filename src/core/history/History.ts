@@ -47,6 +47,7 @@ export class History {
   get inInteraction(): boolean { return this.interactionKind !== null; }
 
   private savedAt = 0;
+  private changes = 0;
   /** True once any step has been dropped, so position 0 is no longer the
    *  document as it was opened. */
   private trimmed = false;
@@ -126,7 +127,10 @@ export class History {
   private push(entry: HistoryEntry): void {
     this.undoStack.push(entry);
     this.redoStack.length = 0;
-    if (this.savedAt > this.undoStack.length) this.savedAt = -1;
+    // The saved state was at or past the entry just replaced, and redo is
+    // gone: nothing can take the document back to it. `>` alone missed the
+    // common case — save, undo, edit — and showed the new state as saved.
+    if (this.savedAt >= this.undoStack.length) this.savedAt = -1;
     this.trim();
   }
 
@@ -315,6 +319,10 @@ export class History {
   /** Unsaved with no step to show for it — a recovered autosave. */
   markDirty(): void { this.savedAt = -1; }
   get isDirty(): boolean { return this.savedAt !== this.undoStack.length; }
+  /** Moves on every change to the document — apply, merge, undo, redo, reset.
+   *  An async save compares it before and after writing: an edit made while
+   *  the file was being written is not in the file. */
+  get revision(): number { return this.changes; }
 
   clear(): void {
     this.undoStack.length = 0;
@@ -347,6 +355,7 @@ export class History {
   /** See `core/doc/freeze.ts`: after every change, so the next command
    *  cannot write into a value an undo step still holds. */
   private settle(): void {
+    this.changes++;
     if (valueFreeze.enabled) freezeValues(this.project);
   }
 }

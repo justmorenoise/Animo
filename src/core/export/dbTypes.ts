@@ -181,5 +181,8 @@ export interface DbAtlas {
   imagePath: string;
   width: number;
   height: number;
+  /** Texture resolution below 1; absent = 1. The parser keeps `1 / scale`
+   *  and multiplies every sprite by it (`PixiSlot._textureScale`). */
+  scale?: number;
   SubTexture: DbSubTexture[];
 }

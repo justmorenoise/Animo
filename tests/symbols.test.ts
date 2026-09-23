@@ -354,3 +354,147 @@ describe("renaming a library item", () => {
     expect(RenameLibraryItem.clashes(project, img.id, "hand")).toBe(false);
   });
 });
+
+describe("ConvertToSymbol keeps what it moves where it was", () => {
+  const close = (m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+                 n: typeof m) => {
+    for (const k of ["a", "b", "c", "d", "tx", "ty"] as const) expect(m[k]).toBeCloseTo(n[k], 6);
+  };
+  /** World matrix of `name` at `frame`, looked through the instance when it moved. */
+  function worldAt(host: SymbolItem, cmd: ConvertToSymbol | null, name: string, frame: number) {
+    const anim = host.animations[0]!;
+    const hostPose = evaluateSymbol(host, anim, frame, "animate");
+    const direct = hostPose.entries.find((e) => e.node.name === name);
+    if (direct || !cmd?.symbol || !cmd.instance) return direct!.world;
+    const inner = evaluateSymbol(cmd.symbol, cmd.symbol.animations[0]!, frame, "animate");
+    const e = inner.entries.find((x) => x.node.name === name)!;
+    const inst = hostPose.byNode.get(cmd.instance.id)!.world;
+    return {
+      a: inst.a * e.world.a + inst.c * e.world.b, b: inst.b * e.world.a + inst.d * e.world.b,
+      c: inst.a * e.world.c + inst.c * e.world.d, d: inst.b * e.world.c + inst.d * e.world.d,
+      tx: inst.a * e.world.tx + inst.c * e.world.ty + inst.tx,
+      ty: inst.b * e.world.tx + inst.d * e.world.ty + inst.ty,
+    };
+  }
+
+  it("roots under different parents: bind pose and every key stay put", () => {
+    const { project, root, a, outside } = scene();
+    const g = createNode("group", "g", { x: 300, y: 40 });
+    g.bind = tf(300, 40, 30, 30, 2, 2);
+    root.nodes[g.id] = g;
+    root.layers.push(createLayer(g.id, "g", 9));
+    a.parentId = g.id;
+    const anim = root.animations[0]!;
+    anim.duration = 11;
+    anim.tracks[g.id] = { nodeId: g.id, endFrame: 10, keys: [
+      { frame: 0, transform: tf(300, 40, 30, 30, 2, 2), displayIndex: 0, tween: TWEEN_LINEAR },
+      { frame: 10, transform: tf(500, 40, 90, 90, 2, 2), displayIndex: 0, tween: TWEEN_LINEAR },
+    ] };
+    anim.tracks[a.id] = { nodeId: a.id, endFrame: 10, keys: [
+      { frame: 0, transform: tf(10, 0), displayIndex: 0, tween: TWEEN_LINEAR },
+      { frame: 10, transform: tf(20, 5), displayIndex: 0, tween: TWEEN_LINEAR },
+    ] };
+    const before = [0, 10].map((f) => [worldAt(root, null, "a", f), worldAt(root, null, "outside", f)]);
+
+    const history = new History(project);
+    const cmd = new ConvertToSymbol(root.id, [a.id, outside.id], "Mixed");
+    history.apply(cmd);
+    [0, 10].forEach((f, i) => {
+      close(worldAt(root, cmd, "a", f), before[i]![0]!);
+      close(worldAt(root, cmd, "outside", f), before[i]![1]!);
+    });
+    expect(cmd.instance!.parentId).toBeNull();
+    history.undo();
+    expect(root.nodes[a.id]!.parentId).toBe(g.id);
+    close(worldAt(root, null, "a", 10), before[1]![0]!);
+  });
+
+  it("a shared parent keeps the instance's origin on the artwork", () => {
+    const { project, root, a, b } = scene();
+    const g = createNode("group", "g", { x: 500, y: 0 });
+    root.nodes[g.id] = g;
+    root.layers.push(createLayer(g.id, "g", 9));
+    a.parentId = g.id;
+    b.parentId = g.id;
+    const worldBefore = worlds(project, root.id).get("a")!;
+    const cmd = new ConvertToSymbol(root.id, [a.id, b.id], "Pair");
+    cmd.apply(project);
+    const inst = evaluateSymbol(root, null, 0, "setup").byNode.get(cmd.instance!.id)!.world;
+    // The artwork sits around x = 500 + 360 in the scene; the origin must too.
+    expect(inst.tx).toBeCloseTo(860, 6);
+    expect(cmd.instance!.parentId).toBe(g.id);
+    close(worldAt(root, cmd, "a", 0), worldBefore);
+  });
+
+  it("IK constraints travel with the bones they solve", () => {
+    const { project, root } = scene();
+    const thigh = createNode("bone", "thigh", { x: 100, y: 100 });
+    const shin = createNode("bone", "shin", { parentId: thigh.id, x: 40, y: 0 });
+    const target = createNode("bone", "target", { x: 170, y: 120 });
+    for (const n of [thigh, shin, target]) {
+      root.nodes[n.id] = n;
+      root.layers.push(createLayer(n.id, n.name, 9));
+    }
+    const constraint = { id: "k1" as never, name: "leg", boneId: shin.id, targetId: target.id, chain: 1 as const, bendPositive: true, weight: 1 };
+    const other = { ...constraint, id: "k2" as never, name: "other", targetId: thigh.id, boneId: thigh.id };
+    root.ik = [other, constraint];
+
+    const history = new History(project);
+    const cmd = new ConvertToSymbol(root.id, [thigh.id, target.id], "Leg");
+    history.apply(cmd);
+    expect(cmd.symbol!.ik).toEqual([other, constraint]);
+    expect(root.ik).toEqual([]);
+    history.undo();
+    expect(root.ik).toEqual([other, constraint]);
+    expect(project.items[cmd.symbol!.id]).toBeUndefined();
+    history.redo();
+    expect(root.ik).toEqual([]);
+    expect((project.items[cmd.symbol!.id] as SymbolItem).ik).toHaveLength(2);
+  });
+
+  it("a constraint reaching outside the selection stays in the host", () => {
+    const { project, root } = scene();
+    const bone = createNode("bone", "bone", { x: 10, y: 10 });
+    const target = createNode("bone", "target", { x: 90, y: 10 });
+    for (const n of [bone, target]) {
+      root.nodes[n.id] = n;
+      root.layers.push(createLayer(n.id, n.name, 9));
+    }
+    root.ik = [{ id: "k1" as never, name: "aim", boneId: bone.id, targetId: target.id, chain: 0 as const, bendPositive: true, weight: 1 }];
+    const cmd = new ConvertToSymbol(root.id, [bone.id], "B");
+    cmd.apply(project);
+    expect(root.ik).toHaveLength(1);
+    expect(cmd.symbol!.ik).toEqual([]);
+  });
+});
+
+describe("editing inside a symbol that goes away", () => {
+  it("steps out to the deepest level that still exists", async () => {
+    const { Store, validEditDepth } = await import("@/app/Store");
+    const { project, root, a, b } = scene();
+    const store = new Store(project);
+    const bases: number[] = [];
+    store.onEditContextChange = (m) => bases.push(m.tx);
+    store.selectNodes([a.id, b.id]);
+    const cmd = new ConvertToSymbol(root.id, [a.id, b.id], "Pair");
+    store.apply(cmd);
+    store.enterSymbol(cmd.symbol!.id, { a: 1, b: 0, c: 0, d: 1, tx: 360, ty: 300 });
+    expect(store.currentSymbolId).toBe(cmd.symbol!.id);
+
+    store.undo();
+    expect(store.ui.editPath).toEqual([root.id]);
+    expect(bases.at(-1)).toBe(0);                         // camera back to the scene
+    expect(validEditDepth([root.id, "gone" as ItemId, "x" as ItemId], project)).toBe(0);
+    expect(validEditDepth([root.id], project)).toBe(0);
+  });
+
+  it("clicking the current breadcrumb changes nothing", async () => {
+    const { Store } = await import("@/app/Store");
+    const { project } = scene();
+    const store = new Store(project);
+    store.currentAnimation!.duration = 40;
+    store.setFrame(30);
+    store.exitToDepth(0);
+    expect(store.ui.frame).toBe(30);
+  });
+});

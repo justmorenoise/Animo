@@ -1,4 +1,5 @@
 import { clear, cls, h, on } from "@/view/widgets/dom";
+import { mayReparent } from "@/view/widgets/ikReparentGuard";
 import { icon } from "@/view/icons";
 import type { Store } from "@/app/Store";
 import type { Layer, NodeKind } from "@/core/doc/types";
@@ -239,6 +240,10 @@ export class LayerList {
 
       const r = el.getBoundingClientRect();
       const into = isGroup && e.clientY > r.top + r.height * 0.3 && e.clientY < r.bottom - r.height * 0.3;
+      const draggedNode = sym.nodes[dragged.nodeId];
+      const target = sym.nodes[layer.nodeId];
+      const reparents = into || (!!draggedNode && !!target && draggedNode.parentId !== target.parentId);
+      if (reparents && !mayReparent(this.store, [dragged.nodeId])) return;
 
       if (into) {
         this.store.apply(new SetParent(this.store.currentSymbolId, [dragged.nodeId], layer.nodeId));
@@ -246,8 +251,6 @@ export class LayerList {
         this.store.transaction("Move Layer", () => {
           // Reordering next to a row also adopts that row's parent, so a
           // layer dropped between two children of a group joins the group.
-          const target = sym.nodes[layer.nodeId];
-          const draggedNode = sym.nodes[dragged.nodeId];
           if (target && draggedNode && draggedNode.parentId !== target.parentId) {
             this.store.apply(new SetParent(
               this.store.currentSymbolId, [dragged.nodeId], target.parentId,
@@ -333,7 +336,12 @@ export class LayerList {
     input.focus();
     input.select();
 
+    // Once: re-rendering removes the focused input, its `blur` fires, and a
+    // second commit(true) saved the very text Escape was throwing away.
+    let done = false;
     const commit = (save: boolean) => {
+      if (done) return;
+      done = true;
       const next = input.value.trim();
       if (save && next && next !== layer.name) {
         this.store.apply(new RenameLayer(this.store.currentSymbolId, layer.id, next));

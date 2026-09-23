@@ -51,6 +51,10 @@ let display: dragonBones.PixiArmatureDisplay | null = null;
 let factory: dragonBones.PixiFactory | null = null;
 let textures: PIXI.Texture[] = [];
 let currentAnimation = "";
+/** The last `setLoop`: every later play has to honour it, or switching the
+ *  animation with Loop off played the new one forever. */
+let loop = true;
+const playTimes = () => (loop ? 0 : 1);
 let fitBox: { x: number; y: number; w: number; h: number } | null = null;
 let stageBox: { width: number; height: number; background: string } | null = null;
 let stageGfx: PIXI.Graphics | null = null;
@@ -201,7 +205,7 @@ async function load(msg: Extract<HostToFrame, { type: "load" }>): Promise<void> 
   a.stage.addChild(display);
   if (currentAnimation) {
     if (msg.play) {
-      display.animation.play(currentAnimation, 0);
+      display.animation.play(currentAnimation, playTimes());
       playChildren(display.armature, currentAnimation);
     } else {
       seekTo(display.armature, currentAnimation, msg.frame ?? 0);
@@ -420,7 +424,7 @@ window.addEventListener("message", (event: MessageEvent) => {
 
       case "play":
         if (display && currentAnimation) {
-          display.animation.play(currentAnimation, 0);
+          display.animation.play(currentAnimation, playTimes());
           playChildren(display.armature, currentAnimation);
         }
         break;
@@ -431,7 +435,7 @@ window.addEventListener("message", (event: MessageEvent) => {
         if (display && currentAnimation) {
           const state = display.animation.getState(currentAnimation);
           if (state) { state.play(); resumeChildren(display.armature); }
-          else { display.animation.play(currentAnimation, 0); playChildren(display.armature, currentAnimation); }
+          else { display.animation.play(currentAnimation, playTimes()); playChildren(display.armature, currentAnimation); }
         }
         break;
 
@@ -445,9 +449,10 @@ window.addEventListener("message", (event: MessageEvent) => {
       case "setLoop":
         // 0 is "forever", exactly as `playTimes` means everywhere else. A
         // nested symbol always loops: it is scenery under the parent's clock.
+        loop = msg.on;
         if (display && currentAnimation) {
           const state = display.animation.getState(currentAnimation);
-          if (state) state.playTimes = msg.on ? 0 : 1;
+          if (state) state.playTimes = playTimes();
         }
         break;
 
@@ -463,7 +468,7 @@ window.addEventListener("message", (event: MessageEvent) => {
       case "setAnimation":
         if (display && display.animation.animationNames.includes(msg.name)) {
           currentAnimation = msg.name;
-          display.animation.play(currentAnimation, 0);
+          display.animation.play(currentAnimation, playTimes());
           playChildren(display.armature, currentAnimation);
         }
         break;

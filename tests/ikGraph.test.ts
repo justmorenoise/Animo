@@ -100,3 +100,14 @@ describe("ikSummary", () => {
     expect(ikSummary(f.rig, f.node("chest"))).toBeNull();
   });
 });
+
+describe("ikDrivenAmong", () => {
+  it("names the solved bones in a re-parent, and nothing else", async () => {
+    const { loadStickman } = await import("./fixtures/stickman");
+    const { ikDrivenAmong } = await import("@/core/doc/ikGraph");
+    const f = await loadStickman();
+    const ids = ["leg_near_thigh", "leg_near_shin", "foot_near_target", "head_art"].map((n) => f.node(n));
+    expect(ikDrivenAmong(f.rig, ids)).toEqual([f.node("leg_near_thigh"), f.node("leg_near_shin")]);
+    expect(ikDrivenAmong(f.rig, [f.node("head_art")])).toEqual([]);
+  });
+});

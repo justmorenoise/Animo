@@ -141,8 +141,10 @@ export class SceneRenderer {
 
       // Hiding the mask layer reveals the group unmasked, which is both what
       // Flash does while authoring and, as it happens, what Pixi does when a
-      // mask display has `visible = false`.
-      if (!maskEntry || !maskEntry.visible || hiddenLayers?.has(maskNode)) {
+      // mask display has `visible = false`. `hiddenLayers` is not that: it
+      // leaves a layer's ARTWORK out (a locked layer from the onion skin), and
+      // a mask's artwork is never drawn anyway — it still clips.
+      if (!maskEntry || !maskEntry.visible) {
         for (const g of visible) {
           mul(world, base, g.world);
           this.drawEntry(ctx, g, world, depth, when);

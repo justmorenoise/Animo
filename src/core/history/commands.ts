@@ -1,4 +1,4 @@
-import type { Command, TouchSet } from "./Command";
+import { adoptBefore, type Command, type TouchSet } from "./Command";
 import type {
     BlendMode,
     ColorTransform,
@@ -15,6 +15,7 @@ import type {
 } from "@/core/doc/types";
 import { DEFAULT_MOTION_BLUR, isDefaultColor, isImage, isSymbol } from "@/core/doc/types";
 import type { Transform } from "@/core/math/Transform";
+import { type ExportSettings, isDefaultExport } from "@/core/export/settings";
 import { cloneTf, fromMatrix, translateLocal } from "@/core/math/Transform";
 import { invert, mat, type Matrix2D, mul } from "@/core/math/Matrix2D";
 import type { AssetId, ItemId, LayerId, NodeId } from "@/core/doc/ids";
@@ -114,15 +115,15 @@ export class ReplaceImageAsset implements Command {
     if (!isImage(item)) return;
     this.before = { assetId: item.assetId, width: item.width, height: item.height };
     Object.assign(item, this.next);
-    // Bounds are cached per SYMBOL and know nothing about an image resizing.
-    invalidateBounds();
+    // Reaches every symbol measured through this image.
+    invalidateBounds([this.id]);
   }
 
   revert(p: Project): void {
     const item = p.items[this.id];
     if (!isImage(item) || !this.before) return;
     Object.assign(item, this.before);
-    invalidateBounds();
+    invalidateBounds([this.id]);
   }
 }
 
@@ -347,6 +348,7 @@ export class SetBindTransform implements Command {
   mergeWith(next: Command): boolean {
     if (!(next instanceof SetBindTransform)) return false;
     if (next.symbolId !== this.symbolId) return false;
+    this.touches.nodes?.push(...adoptBefore(this.before, next.before));
     for (const [id, t] of next.after) this.after.set(id, cloneTf(t));
     return true;
   }
@@ -395,6 +397,7 @@ export class SetBindColor implements Command {
   mergeWith(next: Command): boolean {
     if (!(next instanceof SetBindColor)) return false;
     if (next.symbolId !== this.symbolId) return false;
+    this.touches.nodes?.push(...adoptBefore(this.before, next.before));
     for (const [id, c] of next.after) this.after.set(id, c ? { ...c } : undefined);
     return true;
   }
@@ -1184,3 +1187,29 @@ function clampInt(v: number, lo: number, hi: number): number {
   const n = Number.isFinite(v) ? Math.round(v) : lo;
   return Math.max(lo, Math.min(hi, n));
 }
+
+/**
+ * The document's export settings, replaced whole. Settings equal to the
+ * defaults are stored as absent, so a file nobody configured stays as it was.
+ */
+export class SetExportSettings implements Command {
+  readonly kind = "doc.export";
+  readonly touches: TouchSet = { library: false };
+  readonly label = "Export Settings";
+  private before: ExportSettings | undefined;
+  private captured = false;
+
+  constructor(private readonly next: ExportSettings) {}
+
+  apply(p: Project): void {
+    if (!this.captured) { this.before = p.exportSettings; this.captured = true; }
+    if (isDefaultExport(this.next)) delete p.exportSettings;
+    else p.exportSettings = { ...this.next };
+  }
+
+  revert(p: Project): void {
+    if (this.before) p.exportSettings = this.before;
+    else delete p.exportSettings;
+  }
+}
+

@@ -1076,6 +1076,13 @@ positions) are all behaviour the exported file inherits.
   changes under the playhead afterwards — and it reads the rendered pose, not a freshly
   composed one, so a bone the IK solver has turned reports the frame the user is actually
   looking at.
+- **Re-parenting a bone the IK solves is refused** (`mayReparent` in
+  `view/widgets/ikReparentGuard.ts`, the rule in `ikDrivenAmong`). `SetParent`
+  keeps a node where it LOOKS, and a solved bone looks the way the IK bends it,
+  so the bend would be written into its rest pose and solved again on top at
+  export. The dialog can stop refusing; Preferences ▸ General ▸ Bones and IK
+  (`general.guardIkReparent`) turns it back on. Every `SetParent` a gesture
+  makes goes through it: the layer list, the Outline, New Group, Bind to Bone.
 - Parity, worth re-running after touching either side: build a two-bone chain, then
   compare `app.viewport.pose.byNode.get(id).world` against the runtime's
   `__preview.display.armature.getBone(name).globalTransformMatrix` at several target
@@ -1424,6 +1431,36 @@ constrained by what `PixiSlot` actually applies — not by what the format can e
   `instanceof PIXI.Sprite`, and a child armature's display is a Container. Alpha still cascades
   through `_globalAlpha`. The panel offers instances Alpha only; the exporter warns.
 - `SceneRenderer` sets `globalCompositeOperation` on the FINAL draw, never on the tint bake.
+
+## Export settings
+
+File ▸ Export Settings… (`view/export/ExportSettingsDialog.ts`) edits
+`Project.exportSettings` (schema v7): per DOCUMENT, because the atlas a game
+needs belongs to that game. Absent means `DEFAULT_EXPORT_SETTINGS`, which is
+exactly what the exporter wrote before the setting existed, and settings equal
+to the defaults are stored as absent. `core/export/settings.ts` is pure: the
+shape, `sanitizeExportSettings` (the load path and the dialog), `pageLimit`,
+`exportNotes`. `atlasOptionsFor` turns them into the atlas builder's options.
+The preview builds with the same settings: it stays the ground truth.
+
+Read out of the vendored runtime, not assumed:
+
+- **Several pages are native.** The factory keeps a LIST of atlases per name
+  and searches all of them, which is why `_tex_0.._tex_n` always worked.
+  "One page per image" is the same mechanism with one region per page, named
+  after the image (`pageStems`). A folder of loose PNGs is not loadable: the
+  factory only finds textures through an atlas.
+- **Texture scale is native.** The atlas JSON's `scale` is parsed as
+  `atlas.scale = 1 / scale` and `PixiSlot` multiplies every sprite by it
+  (`_textureScale`), so a 50% atlas draws the rig at full size. Measured in the
+  preview on `frog.animo`: sprite bounds within 0.26 px of the 100% build, the
+  rounding of the reduced sizes.
+- Resampling is `core/atlas/resample.ts`, not a canvas: `imageSmoothingQuality`
+  differs between browsers. Separable, on PREMULTIPLIED colour (straight alpha
+  darkens every anti-aliased edge), the kernel widened by the shrink factor.
+- **Power of two rounds the page limit DOWN** (`pageLimit`). Rounding the page
+  up and clamping it to a limit that is not a power of two gave pages that were
+  not one, silently; the dialog now says what the limit became.
 
 ## Runtime extensions
 

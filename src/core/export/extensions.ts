@@ -149,7 +149,7 @@ DragonBones format cannot describe (the extensions).
 
 | File | Purpose |
 |---|---|
-| \`${fileBase}_ske.json\`, \`${fileBase}_tex*.json\`, \`${fileBase}_tex*.png\` | Standard DragonBones files: any DragonBones runtime loads them |
+| \`${fileBase}_ske.json\`, \`${fileBase}_tex*.json\`, \`${fileBase}_tex*.png\` (or \`.webp\`) | Standard DragonBones files: any DragonBones runtime loads them |
 | \`${fileBase}_ext.json\` | The extensions used by this animation |
 | \`${RUNTIME_FILE}\` | Applies the extensions in PixiJS 8 (ES module, no dependencies) |
 

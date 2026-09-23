@@ -5,6 +5,7 @@ import { Keymap } from "./Keymap";
 import { COMMANDS_BY_ID, PANEL_COMMANDS } from "@/core/keys/commands";
 import { openKeymapDialog } from "@/view/prefs/KeymapDialog";
 import { openSettings } from "@/view/prefs/SettingsDialog";
+import { openExportSettings } from "@/view/export/ExportSettingsDialog";
 import type { PrefsCategory } from "@/core/prefs/prefs";
 import { applyTheme } from "@/view/prefs/theme";
 import { AssetStore } from "./AssetStore";
@@ -50,6 +51,8 @@ import {
 } from "@/core/history/commands";
 import { maskCandidate, nearestMaskAbove } from "@/core/doc/layerTree";
 import { AddSymbol, ConvertToSymbol, DuplicateLibraryItem, wouldCreateCycle, } from "@/core/history/symbolCommands";
+import { evaluateSymbol, pointInParent } from "@/core/doc/pose";
+import { mayReparent } from "@/view/widgets/ikReparentGuard";
 import { menuAnchor, type MenuEntry, showMenu } from "@/view/widgets/Dock";
 import type { Layer, Node } from "@/core/doc/types";
 import { isImage, isSymbol } from "@/core/doc/types";
@@ -82,6 +85,8 @@ export class App {
   readonly timeline: TimelinePanel;
   readonly project: ProjectService;
   private toast = new Toast();
+  /** The "unsaved work was found" bar, while it is on screen. */
+  private recoveryBar: HTMLElement | null = null;
   readonly clipboard = new Clipboard();
   readonly keymap: Keymap;
 
@@ -448,6 +453,10 @@ export class App {
     this.viewport.clearGuides();
     this.viewport.fitToStage();
     this.timeline.playback.pause();
+    this.clipboard.reset();
+    this.timeline.frames.reset();
+    this.recoveryBar?.remove();
+    this.recoveryBar = null;
     // `replaceProject` emits "doc", which the session listens to; this says
     // out loud that the preview must not survive the document it was built
     // from.
@@ -471,16 +480,17 @@ export class App {
     const discard = h("button", { class: "btn" }, "Discard");
     bar.append(restore, discard);
 
-    const close = () => bar.remove();
+    const close = () => { bar.remove(); this.recoveryBar = null; };
     restore.addEventListener("click", () => {
-      close();
-      void this.project.recover(record);
+      // Asks first, as Open does: by now there may be work of its own here.
+      void this.project.recover(record).then((ok) => { if (ok) close(); });
     });
     discard.addEventListener("click", () => {
       close();
-      this.project.discardRecovery();
+      void this.project.discardRecovery(record);
     });
 
+    this.recoveryBar = bar;
     this.shell.el.parentElement?.insertBefore(bar, this.shell.el);
   }
 
@@ -507,7 +517,11 @@ export class App {
     // new layer appearing on top of it.
     const empty = this.selectedEmptyNode();
     if (empty) {
-      const at = { ...cloneTf(empty.bind), x: Math.round(x), y: Math.round(y) };
+      // The pose on screen: the pointer is where the user saw the group.
+      const pose = this.viewport.pose ?? evaluateSymbol(
+        this.store.currentSymbol, this.store.currentAnimation, this.store.ui.frame, this.store.ui.mode);
+      const local = pointInParent(pose, empty, x, y);
+      const at = { ...cloneTf(empty.bind), x: Math.round(local.x), y: Math.round(local.y) };
       this.store.transaction(`Add ${item.name}`, () => {
         fillEmptyNode(this.store, empty.id, {
           itemId, kind: isImage(item) ? "image" : "symbol", pivot: { x: pivotX, y: pivotY }, transform: at,
@@ -943,6 +957,7 @@ export class App {
   private bindToBone(): void {
     const bind = this.bindableToBone();
     if (!bind) return;
+    if (!mayReparent(this.store, bind.ids)) return;
     this.store.apply(new SetParent(this.store.currentSymbolId, bind.ids, bind.boneId, true));
     this.store.emit("doc");
     this.toast.show(
@@ -982,6 +997,7 @@ export class App {
           it("file.importPsd"),
           it("file.export"),
           it("file.exportFolder"),
+          it("file.exportSettings"),
         ],
       },
       {
@@ -1179,6 +1195,7 @@ export class App {
     reg("file.importPsd", () => this.pickPsd());
     reg("file.export", () => void this.exportProject());
     reg("file.exportFolder", () => void this.exportToFolder());
+    reg("file.exportSettings", () => openExportSettings(this.store));
 
     reg("edit.undo", () => s.undo(), () => s.history.canUndo);
     reg("edit.redo", () => s.redo(), () => s.history.canRedo);

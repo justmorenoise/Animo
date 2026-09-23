@@ -9,8 +9,11 @@ import { translateLocal, matrixOf } from "@/core/math/Transform";
 import { TWEEN_LINEAR } from "@/core/math/easing";
 import {
   childFrame, innerContext, symbolBounds, localBox, invalidateBounds, SETUP_CONTEXT,
+  evaluateSymbol, pointInParent,
 } from "@/core/doc/pose";
-import { SetPivot } from "@/core/history/commands";
+import { ReplaceImageAsset, SetBindTransform, SetPivot } from "@/core/history/commands";
+import { EditTracks } from "@/core/history/timelineCommands";
+import { History } from "@/core/history/History";
 import { exportSkeleton } from "@/core/export/exportSkeleton";
 
 beforeEach(() => { reseed(); invalidateBounds(); });
@@ -223,5 +226,63 @@ describe("exporting a symbol instance's transform point", () => {
     const { skeleton } = exportSkeleton(project);
     const scene = skeleton.armature.find((a) => a.name === "Scene 1")!;
     expect(scene.skin[0]!.slot[0]!.display[0]).toEqual({ name: "part", type: "armature" });
+  });
+});
+
+describe("the bounds cache", () => {
+  /** root > outer > inner > image: an edit two levels down. */
+  function deep() {
+    const n = nested();
+    const outer = createSymbol("outer");
+    const holder = createNode("symbol", "holder", { itemId: n.inner.id, x: 0, y: 0 });
+    outer.nodes[holder.id] = holder;
+    outer.layers.push(createLayer(holder.id, "holder", 0));
+    n.project.items[outer.id] = outer;
+    n.project.itemOrder.push(outer.id);
+    return { ...n, outer, history: new History(n.project) };
+  }
+
+  it("forgets every symbol that contains the one edited", () => {
+    const { project, inner, outer, leaf, history } = deep();
+    expect(symbolBounds(project, outer.id).x).toBeCloseTo(20, 9);
+    history.apply(new SetBindTransform(inner.id, new Map([[leaf.id, tf(70, 10)]])));
+    expect(symbolBounds(project, inner.id).x).toBeCloseTo(70, 9);
+    expect(symbolBounds(project, outer.id).x).toBeCloseTo(70, 9);
+    history.undo();
+    expect(symbolBounds(project, outer.id).x).toBeCloseTo(20, 9);
+  });
+
+  it("forgets animated bounds when a key inside changes", () => {
+    const { project, inner, outer, leaf, history } = deep();
+    const ctx = { animationName: "animation", frame: 0, mode: "animate" as const };
+    expect(symbolBounds(project, outer.id, ctx).x).toBeCloseTo(20, 9);
+    history.apply(new EditTracks("k", inner.id, inner.animations[0]!.id, new Map([[leaf.id, {
+      nodeId: leaf.id, endFrame: 0,
+      keys: [{ frame: 0, transform: tf(90, 10), displayIndex: 0, tween: TWEEN_LINEAR }],
+    }]])));
+    expect(symbolBounds(project, outer.id, ctx).x).toBeCloseTo(90, 9);
+  });
+
+  it("forgets the symbols showing an image that was replaced", () => {
+    const { project, outer, img, history } = deep();
+    expect(symbolBounds(project, outer.id).w).toBeCloseTo(100, 9);
+    history.apply(new ReplaceImageAsset(img.id, { assetId: "asset_big" as AssetId, width: 300, height: 60 }, []));
+    expect(symbolBounds(project, outer.id).w).toBeCloseTo(300, 9);
+  });
+});
+
+describe("pointInParent", () => {
+  it("expresses a point where a child of a moved, turned group must sit", () => {
+    const { root } = nested();
+    const g = createNode("group", "g");
+    g.bind = tf(300, 100, 90, 90, 2, 2);                 // moved, quarter turn, doubled
+    const child = createNode("empty", "slot", { parentId: g.id });
+    for (const n of [g, child]) { root.nodes[n.id] = n; root.layers.push(createLayer(n.id, n.name, 5)); }
+    const pose = evaluateSymbol(root, null, 0, "setup");
+    const p = pointInParent(pose, child, 300, 140);        // 40px below the group's origin
+    expect(p.x).toBeCloseTo(20, 9);                        // its +x points down, scale 2
+    expect(p.y).toBeCloseTo(0, 9);
+    const top = createNode("empty", "top");
+    expect(pointInParent(pose, top, 12, 34)).toEqual({ x: 12, y: 34 });
   });
 });

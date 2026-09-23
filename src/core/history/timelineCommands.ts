@@ -4,6 +4,8 @@ import { isSymbol } from "@/core/doc/types";
 import type { AnimId, ItemId, NodeId } from "@/core/doc/ids";
 import type { ChannelEases, TweenSpec } from "@/core/math/easing";
 import { createAnimation } from "@/core/doc/defaults";
+import { endAfterResize } from "@/core/doc/timeline";
+import { invalidateBounds } from "@/core/doc/pose";
 
 function symbolOf(p: Project, id: ItemId): SymbolItem {
   const s = p.items[id];
@@ -67,6 +69,7 @@ export class EditTracks implements Command {
       else delete anim.tracks[id];
     }
     anim.duration = durationFor(anim);
+    invalidateBounds([this.symbolId]);
   }
 
   revert(p: Project): void {
@@ -77,6 +80,7 @@ export class EditTracks implements Command {
       else delete anim.tracks[id];
     }
     anim.duration = this.beforeDuration;
+    invalidateBounds([this.symbolId]);
   }
 
   mergeWith(next: Command): boolean {
@@ -124,7 +128,8 @@ export class SetAnimationDuration implements Command {
   readonly kind = "anim.duration";
   readonly touches: TouchSet;
   readonly label = "Change Duration";
-  private before = 0;
+  /** The duration before the first step; a redo starts from it again. */
+  private before: number | null = null;
 
   constructor(
     private readonly symbolId: ItemId,
@@ -141,27 +146,29 @@ export class SetAnimationDuration implements Command {
   apply(p: Project): void {
     const anim = animOf(symbolOf(p, this.symbolId), this.animId);
     if (!anim) return;
-    this.before = anim.duration;
+    this.before ??= anim.duration;
     const next = Math.max(1, Math.round(this.duration));
     anim.duration = next;
     // Duration is derived from the spans, so setting it explicitly has to
-    // move them; otherwise the next track edit would snap it straight back.
-    // New tracks: the old ones belong to earlier undo steps too.
+    // move the ones that reach the end; otherwise the next track edit would
+    // snap it straight back. New tracks: the old ones belong to earlier undo
+    // steps too.
     for (const [id, track] of Object.entries(anim.tracks) as Array<[NodeId, Track | undefined]>) {
       if (!track) continue;
       if (!this.beforeTracks.has(id)) this.beforeTracks.set(id, track);
-      const lastKey = track.keys[track.keys.length - 1]?.frame ?? 0;
-      const endFrame = Math.max(lastKey, next - 1);
+      const endFrame = endAfterResize(track, this.before, next);
       if (endFrame !== track.endFrame) anim.tracks[id] = { ...track, endFrame };
     }
     anim.duration = durationFor(anim);
+    invalidateBounds([this.symbolId]);
   }
 
   revert(p: Project): void {
     const anim = animOf(symbolOf(p, this.symbolId), this.animId);
     if (!anim) return;
     for (const [id, track] of this.beforeTracks) anim.tracks[id] = track;
-    anim.duration = this.before;
+    if (this.before !== null) anim.duration = this.before;
+    invalidateBounds([this.symbolId]);
   }
 
   mergeWith(next: Command): boolean {
@@ -210,10 +217,14 @@ export class AddAnimation implements Command {
     this.animation = createAnimation(name, duration);
     this.touches = { symbols: [symbolId], timeline: true };
   }
-  apply(p: Project): void { symbolOf(p, this.symbolId).animations.push(this.animation); }
+  apply(p: Project): void {
+    symbolOf(p, this.symbolId).animations.push(this.animation);
+    invalidateBounds([this.symbolId]);
+  }
   revert(p: Project): void {
     const sym = symbolOf(p, this.symbolId);
     sym.animations = sym.animations.filter((a) => a.id !== this.animation.id);
+    invalidateBounds([this.symbolId]);
   }
 }
 
@@ -235,10 +246,12 @@ export class RemoveAnimation implements Command {
     if (this.index < 0) return;
     this.removed = sym.animations[this.index]!;
     sym.animations.splice(this.index, 1);
+    invalidateBounds([this.symbolId]);
   }
   revert(p: Project): void {
     if (!this.removed) return;
     symbolOf(p, this.symbolId).animations.splice(this.index, 0, this.removed);
+    invalidateBounds([this.symbolId]);
   }
   estimateSize(): number { return JSON.stringify(this.removed ?? {}).length * 2; }
 }
@@ -261,10 +274,12 @@ export class RenameAnimation implements Command {
     if (!anim) return;
     this.before = anim.name;
     anim.name = this.name;
+    invalidateBounds([this.symbolId]);
   }
   revert(p: Project): void {
     const anim = animOf(symbolOf(p, this.symbolId), this.animId);
     if (anim) anim.name = this.before;
+    invalidateBounds([this.symbolId]);
   }
 }
 

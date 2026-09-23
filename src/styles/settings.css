@@ -106,6 +106,8 @@
 .settings .prow > label { text-align: left; white-space: normal; }
 .settings .prow .field { width: 110px; }
 .settings .prow input[type="checkbox"] { margin: 0; }
+.settings .prow select.preview-anim { width: 200px; max-width: 100%; }
+.settings .prow select:disabled { opacity: 0.45; }
 
 .settings .pnote {
   margin: 6px 0 2px;
@@ -136,6 +138,9 @@
 .modal-form .prow { grid-template-columns: 90px minmax(0, 1fr); }
 .modal-form .prow > label { text-align: left; }
 .modal-form .field { width: 120px; }
+.modal-form > p { margin: 0 0 12px; line-height: 1.4; }
+.modal-check { display: flex; align-items: flex-start; gap: 8px; }
+.modal-check > input { margin: 2px 0 0; flex: none; }
 
 /* ── Ease panel ──────────────────────────────────────────────────────────── */
 .ease-dlg {

@@ -4,6 +4,7 @@ import type { Panel } from "@/view/widgets/Dock";
 import type { Store } from "@/app/Store";
 import type { NodeId } from "@/core/doc/ids";
 import { SetParent } from "@/core/history/commands";
+import { mayReparent } from "@/view/widgets/ikReparentGuard";
 import { isSymbol } from "@/core/doc/types";
 
 /** The node hierarchy, with drag-to-reparent. */
@@ -82,7 +83,7 @@ export class OutlinePanel implements Panel {
     on(row, "drop", (e) => {
       e.preventDefault();
       row.style.outline = "";
-      if (this.dragId && this.dragId !== id) {
+      if (this.dragId && this.dragId !== id && mayReparent(this.store, [this.dragId])) {
         this.store.apply(new SetParent(this.store.currentSymbolId, [this.dragId], id));
         this.store.emit("doc");
       }

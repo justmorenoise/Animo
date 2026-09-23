@@ -102,3 +102,14 @@ export function ikSummary(symbol: SymbolItem, nodeId: NodeId): string | null {
   return `Moved by IK, following ${parts.join("; ")}. `
     + "During playback it follows the target, so do not keyframe it.";
 }
+
+/**
+ * The nodes among `ids` whose pose the IK solver sets. Re-parenting one keeps
+ * it where it LOOKS, and what it looks like is the solved pose: the solve
+ * would be written into its rest pose and keys, which the runtime then
+ * solves again on top.
+ */
+export function ikDrivenAmong(symbol: SymbolItem, ids: readonly NodeId[]): NodeId[] {
+  const { driven } = ikRoles(symbol);
+  return ids.filter((id) => driven.has(id));
+}

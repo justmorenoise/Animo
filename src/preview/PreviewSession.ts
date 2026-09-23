@@ -3,7 +3,7 @@ import type { AssetStore } from "@/app/AssetStore";
 import type { PreviewHost } from "./previewHost";
 import { buildExport, type ExportResult } from "@/io/export/ExportBundle";
 import type { ExtensionManifest } from "@/runtime/animo-pixi";
-import { invalidateBounds, symbolBounds } from "@/core/doc/pose";
+import { symbolBounds } from "@/core/doc/pose";
 import { isSymbol } from "@/core/doc/types";
 
 /**
@@ -210,8 +210,6 @@ export class PreviewSession {
       return;
     }
 
-    // The editor knows the rig's extent; Pixi cannot measure it.
-    invalidateBounds();
     const opts = view.options();
     const target = this.targetFor(opts.scope ?? "symbol", result);
     view.onStatus("");
@@ -261,6 +259,7 @@ export class PreviewSession {
     const animation = here
       ? this.store.currentAnimation?.name
       : sym.animations[0]?.name;
+    // The editor knows the rig's extent; Pixi cannot measure it.
     const b = symbolBounds(project, sym.id);
     return {
       armature,

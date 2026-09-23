@@ -211,20 +211,42 @@ export function indexAbove(sym: SymbolItem, movingId: LayerId, targetId: LayerId
   return Math.max(0, from >= 0 && from < at ? at - 1 : at);
 }
 
-/** Every descendant of a layer, for select-with-children and delete. */
+/** Every descendant of a layer, for select-with-children and delete: depth
+ *  first, children in node order. One pass builds the child lists, so a deep
+ *  rig costs O(n) rather than a scan of every node per descendant. */
 export function descendantsOf(sym: SymbolItem, nodeId: NodeId): NodeId[] {
+  const children = new Map<NodeId, NodeId[]>();
+  for (const node of Object.values(sym.nodes)) {
+    if (!node.parentId) continue;
+    const list = children.get(node.parentId);
+    if (list) list.push(node.id);
+    else children.set(node.parentId, [node.id]);
+  }
   const out: NodeId[] = [];
+  const seen = new Set<NodeId>([nodeId]);
   const walk = (id: NodeId, depth: number) => {
     if (depth > 64) return;
-    for (const node of Object.values(sym.nodes)) {
-      if (node.parentId === id && !out.includes(node.id)) {
-        out.push(node.id);
-        walk(node.id, depth + 1);
-      }
+    for (const child of children.get(id) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      out.push(child);
+      walk(child, depth + 1);
     }
   };
   walk(nodeId, 0);
   return out;
+}
+
+/** `ids` and everything under them, each once, in that order: what a drag, a
+ *  cut or a layer copy actually takes along. */
+export function withDescendants(sym: SymbolItem, ids: readonly NodeId[]): NodeId[] {
+  const out = new Set<NodeId>();
+  for (const id of ids) {
+    if (out.has(id)) continue;
+    out.add(id);
+    for (const d of descendantsOf(sym, id)) out.add(d);
+  }
+  return [...out];
 }
 
 /** The nearest mask layer above `layerId`, or null. */
@@ -235,4 +257,42 @@ export function nearestMaskAbove(sym: SymbolItem, layerId: LayerId): Layer | nul
     if (l.isMask) return l;
   }
   return null;
+}
+
+/**
+ * What New Group does with a selection: which nodes it adopts, where the
+ * group goes and where its origin sits. Pure.
+ *
+ * Only the TOPMOST selected nodes are adopted — a node whose ancestor is also
+ * selected comes along inside it, and re-parenting it too flattened the rig
+ * (⌘A, New Group: every bone lost its parent). The group goes under their
+ * shared parent when they have one, so a group made inside a group stays
+ * there; its origin is the mean of their positions in that space.
+ */
+export function groupPlan(
+  sym: SymbolItem, selected: readonly NodeId[], worldOrigin: (id: NodeId) => { x: number; y: number },
+): { members: NodeId[]; parent: NodeId | null; origin: { x: number; y: number }; index: number } {
+  const chosen = new Set(selected.filter((id) => sym.nodes[id]));
+  const members = [...chosen].filter((id) => {
+    const seen = new Set<NodeId>([id]);
+    for (let p = sym.nodes[id]!.parentId; p && !seen.has(p); p = sym.nodes[p]?.parentId ?? null) {
+      if (chosen.has(p)) return false;
+      seen.add(p);
+    }
+    return true;
+  });
+  const first = members[0] ? sym.nodes[members[0]]!.parentId : null;
+  const shared = members.every((id) => sym.nodes[id]!.parentId === first);
+  const parent = shared ? first : null;
+  // Positions in the group's future parent space: the binds themselves when
+  // they share one, the scene positions when the group lands at the top.
+  const points = members.map((id) => (shared ? sym.nodes[id]!.bind : worldOrigin(id)));
+  const origin = points.length
+    ? {
+        x: Math.round(points.reduce((t, p) => t + p.x, 0) / points.length),
+        y: Math.round(points.reduce((t, p) => t + p.y, 0) / points.length),
+      }
+    : { x: 0, y: 0 };
+  const indices = members.map((id) => sym.layers.findIndex((l) => l.nodeId === id)).filter((i) => i >= 0);
+  return { members, parent, origin, index: indices.length ? Math.min(...indices) : 0 };
 }

@@ -4,7 +4,8 @@ import { createProject, createNode, createLayer, createImageItem } from "@/core/
 import { isSymbol } from "@/core/doc/types";
 import { tf } from "@/core/math/Transform";
 import { TWEEN_LINEAR } from "@/core/math/easing";
-import { Clipboard } from "@/app/Clipboard";
+import { Clipboard, pastedParent } from "@/app/Clipboard";
+import { evaluateSymbol } from "@/core/doc/pose";
 import { Store } from "@/app/Store";
 
 beforeEach(() => reseed());
@@ -465,5 +466,54 @@ describe("layer clipboard", () => {
     clip.copyLayers(store);
     expect(clip.hasContent).toBe(true);
     expect(clip.hasLayers).toBe(true);
+  });
+
+  const clip = () => new Clipboard();
+
+  it("a duplicated child stays in its group, where it was", () => {
+    const { store, nodes } = stack();
+    const sym = store.currentSymbol;
+    const [top, mid, bot] = nodes;
+    sym.nodes[mid!.id]!.bind = tf(200, 0, 30, 30);
+    sym.nodes[bot!.id]!.parentId = mid!.id;            // bot is mid's child
+    store.selectNodes([bot!.id]);
+    const before = evaluateSymbol(sym, null, 0, "setup").byNode.get(bot!.id)!.world;
+
+    expect(clip().duplicateLayers(store)).toBe(1);
+    const copy = Object.values(sym.nodes).find((n) => n.name === "bot_2")!;
+    expect(copy.parentId).toBe(mid!.id);
+    const after = evaluateSymbol(sym, null, 0, "setup").byNode.get(copy.id)!.world;
+    for (const k of ["a", "b", "c", "d", "tx", "ty"] as const) expect(after[k]).toBeCloseTo(before[k], 9);
+    // Still inside mid's block, right above the original.
+    expect(rows(store)).toEqual([top!.name, "mid", "bot_2", "bot"]);
+  });
+});
+
+describe("pastedParent", () => {
+  const ids = (s: string) => s as never;
+  const copies = new Map([[ids("g"), ids("g2")]]);
+  const here = (id: string) => id === "p";
+  it.each([
+    [null, null],
+    ["g", "g2"],      // the parent came along: its copy
+    ["p", "p"],       // exists here: kept
+    ["x", null],      // neither
+  ])("%s → %s", (parent, want) => {
+    expect(pastedParent(parent as never, copies, here)).toBe(want);
+  });
+});
+
+
+describe("a new document", () => {
+  it("empties both clipboard slots", () => {
+    const { store, a } = scene();
+    const clip = new Clipboard();
+    store.selectNodes([a.id]);
+    clip.copy(store);
+    clip.copyLayers(store);
+    clip.reset();
+    expect(clip.hasContent).toBe(false);
+    expect(clip.hasLayers).toBe(false);
+    expect(clip.paste(store)).toBe(0);
   });
 });

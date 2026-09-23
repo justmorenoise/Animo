@@ -8,7 +8,7 @@ import { AddNode, reexpress, RemoveNodes, SetLayerMasks, SetPivot } from "@/core
 import { EditTracks } from "@/core/history/timelineCommands";
 import { applyTransforms, displayAtFrame, fillEmptyNode, transformAtFrame } from "./TimelineOps";
 import { wouldCreateCycle } from "@/core/history/symbolCommands";
-import { descendantsOf, type MaskState } from "@/core/doc/layerTree";
+import { type MaskState, withDescendants } from "@/core/doc/layerTree";
 import { displaySize, evaluateSymbol } from "@/core/doc/pose";
 import { displayAt, itemsOf, kindOfItem } from "@/core/doc/displays";
 import type { Matrix2D } from "@/core/math/Matrix2D";
@@ -300,6 +300,13 @@ export class Clipboard {
 
   get hasLayers(): boolean { return this.layers !== null; }
 
+  /** Forget both slots: ids restart with every document, so what was copied
+   *  from the last one would point at whatever now has the same id. */
+  reset(): void {
+    this.payload = null;
+    this.layers = null;
+  }
+
   /** Copy whole layers, groups included: a group without its children would
    *  paste as an empty container. */
   copyLayers(store: Store): number {
@@ -381,17 +388,17 @@ export class Clipboard {
     const sym = store.currentSymbol;
     const taken = new Set(Object.values(sym.nodes).map((n) => n.name));
 
-    // Fresh ids, and a map so parent links WITHIN the pasted set survive
-    // while links to anything outside it are dropped.
-    const idMap = new Map<NodeId, NodeId>();
-    for (const e of payload.entries) idMap.set(e.node.id, newNodeId());
-
     // Refuse anything that would place a symbol inside itself. Paste is a
     // separate entry point from the library drag, and the guard has to be on
     // every one of them.
     const legal = payload.entries.filter((e) =>
       itemsOf(e.node).every((id) => !wouldCreateCycle(store.project, store.currentSymbolId, id)));
     if (legal.length === 0) return 0;
+
+    // Fresh ids for what is actually pasted, so a parent link inside the set
+    // follows the copy and none points at a node that was refused.
+    const idMap = new Map<NodeId, NodeId>();
+    for (const e of legal) idMap.set(e.node.id, newNodeId());
 
     const created: NodeId[] = [];
     const layerMap = new Map<LayerId, LayerId>();
@@ -411,7 +418,7 @@ export class Clipboard {
         const name = uniqueName(entry.node.name, taken);
         taken.add(name);
 
-        const parentId = entry.node.parentId ? idMap.get(entry.node.parentId) ?? null : null;
+        const parentId = pastedParent(entry.node.parentId, idMap, (id) => !!sym.nodes[id]);
         const node: Node = {
           ...clone(entry.node),
           id,
@@ -422,7 +429,7 @@ export class Clipboard {
         // Only the roots of the pasted set move: a child's transform is local
         // to a parent that has already moved, and offsetting it too put it
         // twice the distance away.
-        const shift = parentId ? { x: 0, y: 0 } : offset;
+        const shift = entry.node.parentId && idMap.has(entry.node.parentId) ? { x: 0, y: 0 } : offset;
         node.bind.x += shift.x;
         node.bind.y += shift.y;
 
@@ -469,6 +476,20 @@ export class Clipboard {
   }
 }
 
+/**
+ * The parent a pasted layer gets: the copy of its parent when that came
+ * along, else the original parent when it exists here, else none. Keeping the
+ * original is what leaves a duplicated layer in its group at the same place;
+ * dropping it put the copy at the top level, offset by the group's transform
+ * and moved to the bottom of the stack.
+ */
+export function pastedParent(
+  parentId: NodeId | null, copies: ReadonlyMap<NodeId, NodeId>, existsHere: (id: NodeId) => boolean,
+): NodeId | null {
+  if (!parentId) return null;
+  return copies.get(parentId) ?? (existsHere(parentId) ? parentId : null);
+}
+
 /** Animation ids are per symbol, so a cross-symbol paste matches by NAME. */
 function animationNames(sym: SymbolItem): Record<string, string> {
   const out: Record<string, string> = {};
@@ -500,16 +521,6 @@ function destinationAnimation(
     : undefined;
 }
 
-/** `ids` plus everything below them, each once, selection first. */
-function withDescendants(sym: SymbolItem, ids: NodeId[]): NodeId[] {
-  const out: NodeId[] = [];
-  for (const id of ids) {
-    if (out.includes(id)) continue;
-    out.push(id);
-    for (const d of descendantsOf(sym, id)) if (!out.includes(d)) out.push(d);
-  }
-  return out;
-}
 
 /**
  * Each node as it looks at the playhead: its pose there as the bind pose,

@@ -254,3 +254,99 @@ describe("dropping a layer on a row", () => {
     expect(sym.layers.map((l) => l.name)).toEqual(["d", "b", "a", "c"]);
   });
 });
+
+describe("New Group", () => {
+  it("adopts only the topmost of a selection, so a rig keeps its hierarchy", async () => {
+    const { loadStickman } = await import("./fixtures/stickman");
+    const { groupPlan } = await import("@/core/doc/layerTree");
+    const { evaluateSymbol } = await import("@/core/doc/pose");
+    const { SetParent, AddNode } = await import("@/core/history/commands");
+    const { createNode: node, createLayer: layer } = await import("@/core/doc/defaults");
+    const { History } = await import("@/core/history/History");
+    const f = await loadStickman();
+    const all = Object.keys(f.rig.nodes) as never[];
+    const parentsBefore = Object.fromEntries(Object.values(f.rig.nodes).map((n) => [n.id, n.parentId]));
+    const before = evaluateSymbol(f.rig, f.rig.animations[0]!, 7, "animate");
+
+    const plan = groupPlan(f.rig, all, () => ({ x: 0, y: 0 }));
+    const roots = Object.values(f.rig.nodes).filter((n) => !n.parentId).map((n) => n.id);
+    expect(new Set(plan.members)).toEqual(new Set(roots));
+
+    const history = new History(f.project);
+    const g = node("group", "g", { x: plan.origin.x, y: plan.origin.y, parentId: plan.parent });
+    history.transaction("Group", () => {
+      history.apply(new AddNode("Group", f.rig.id, g, layer(g.id, "g", 0), plan.index));
+      history.apply(new SetParent(f.rig.id, plan.members, g.id));
+    });
+    for (const n of Object.values(f.rig.nodes)) {
+      if (n.id === g.id) continue;
+      expect(n.parentId).toBe(parentsBefore[n.id] ?? g.id);
+    }
+    const after = evaluateSymbol(f.rig, f.rig.animations[0]!, 7, "animate");
+    for (const [id, e] of before.byNode) {
+      for (const k of ["tx", "ty"] as const) expect(after.byNode.get(id)!.world[k]).toBeCloseTo(e.world[k], 4);
+    }
+  });
+
+  it("goes under the shared parent of what it groups", async () => {
+    const { groupPlan } = await import("@/core/doc/layerTree");
+    const { createSymbol, createNode: node, createLayer: layer } = await import("@/core/doc/defaults");
+    const sym = createSymbol("s");
+    const p = node("group", "p", { x: 100, y: 0 });
+    const a = node("group", "a", { parentId: p.id, x: 10, y: 0 });
+    const b = node("group", "b", { parentId: p.id, x: 30, y: 20 });
+    const c = node("group", "c", { x: 500, y: 500 });
+    for (const n of [p, a, b, c]) { sym.nodes[n.id] = n; sym.layers.push(layer(n.id, n.name, 0)); }
+
+    const shared = groupPlan(sym, [a.id, b.id], () => ({ x: 999, y: 999 }));
+    expect(shared).toMatchObject({ parent: p.id, origin: { x: 20, y: 10 }, index: 1 });
+
+    const mixed = groupPlan(sym, [a.id, c.id], (id) => (id === a.id ? { x: 110, y: 0 } : { x: 500, y: 500 }));
+    expect(mixed).toMatchObject({ parent: null, origin: { x: 305, y: 250 } });
+  });
+});
+
+describe("descendantsOf / withDescendants", () => {
+  /** The quadratic walk it replaced, as the reference. */
+  function reference(sym: { nodes: Record<string, { id: string; parentId: string | null }> }, id: string): string[] {
+    const out: string[] = [];
+    const walk = (at: string, depth: number) => {
+      if (depth > 64) return;
+      for (const n of Object.values(sym.nodes)) {
+        if (n.parentId === at && !out.includes(n.id)) { out.push(n.id); walk(n.id, depth + 1); }
+      }
+    };
+    walk(id, 0);
+    return out;
+  }
+
+  it("matches the old walk on every node of both fixtures, order included", async () => {
+    const { loadStickman } = await import("./fixtures/stickman");
+    const { loadFixture } = await import("./fixtures/realProject");
+    const { descendantsOf } = await import("@/core/doc/layerTree");
+    const { isSymbol } = await import("@/core/doc/types");
+    const projects = [(await loadStickman()).project, (await loadFixture()).project];
+    let checked = 0;
+    for (const project of projects) {
+      for (const sym of Object.values(project.items)) {
+        if (!isSymbol(sym)) continue;
+        for (const id of Object.keys(sym.nodes)) {
+          expect(descendantsOf(sym, id as never)).toEqual(reference(sym, id));
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(20);
+  });
+
+  it("withDescendants takes each node once, selection first", async () => {
+    const { withDescendants } = await import("@/core/doc/layerTree");
+    const { createSymbol, createNode: node } = await import("@/core/doc/defaults");
+    const sym = createSymbol("s");
+    const a = node("group", "a");
+    const b = node("group", "b", { parentId: a.id });
+    const c = node("group", "c", { parentId: b.id });
+    for (const n of [a, b, c]) sym.nodes[n.id] = n;
+    expect(withDescendants(sym, [b.id, a.id])).toEqual([b.id, c.id, a.id]);
+  });
+});

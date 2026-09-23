@@ -65,6 +65,12 @@ const CATEGORIES: Category[] = [
         ],
       },
       {
+        title: "Bones and IK", rows: [
+          { kind: "check", cat: "general", key: "guardIkReparent", label: "Refuse to re-parent bones the IK solves" },
+          { kind: "note", text: "Re-parenting keeps a bone where it looks, and a solved bone looks the way the IK bends it: that bend would be written into its rest pose, and the exported IK would bend it again on top." },
+        ],
+      },
+      {
         title: "New documents", rows: [
           { kind: "number", cat: "general", key: "newDocWidth", label: "Width", unit: "px" },
           { kind: "number", cat: "general", key: "newDocHeight", label: "Height", unit: "px" },

@@ -1,9 +1,10 @@
 import type { Transform } from "@/core/math/Transform";
+import type { ExportSettings } from "@/core/export/settings";
 import type { ChannelEases, TweenSpec } from "@/core/math/easing";
 import type { AnimId, AssetId, IkId, ItemId, LayerId, NodeId } from "./ids";
 
 /** Bumped whenever the on-disk shape changes; `schema.ts` bridges versions. */
-export const DOC_VERSION = 6;
+export const DOC_VERSION = 7;
 
 /* ── Colour ───────────────────────────────────────────────────────────────
    Stored exactly as DragonBones expects: multipliers as 0-100 percentages,
@@ -253,6 +254,9 @@ export interface Project {
   stage: StageSettings;
   /** Absent means off, so older files stay byte-identical when saved. */
   motionBlur?: MotionBlurSettings;
+  /** What File ▸ Export writes (`core/export/settings.ts`). Absent means the
+   *  defaults, which are what the exporter wrote before the setting existed. */
+  exportSettings?: ExportSettings;
   items: Record<ItemId, LibraryItem>;
   folders: Record<string, LibraryFolder>;
   /** Item ids in library display order. */

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { tf, matrixOf, toMatrix, shearOf, type Transform } from "@/core/math/Transform";
 import { mat, matOf, mul, apply, clone } from "@/core/math/Matrix2D";
 import {
-  snapshotOf, moveBy, rotateAbout, scaleLocal, skewLocal, applyWorldMatrix,
+  snapshotOf, moveBy, rotateAbout, scaleLocal, skewLocal, applyWorldMatrix, uniformFactor,
   movePivotKeepingArtwork, topmostSelected,
 } from "@/view/tools/transformOps";
 import type { NodeId } from "@/core/doc/ids";
@@ -432,5 +432,75 @@ describe("topmostSelected", () => {
     const moved = moveBy(rootSnap(parent), 10, 0);
     const childWorld = mul(mat(), matrixOf(moved), matrixOf(child));
     expect(childWorld.tx).toBeCloseTo(160, 9);
+  });
+});
+
+describe("mirrored and uniform edge edits", () => {
+  const sameMatrix = (a: ReturnType<typeof tf>, b: ReturnType<typeof tf>) => {
+    const m = toMatrix(mat(), a), n = toMatrix(mat(), b);
+    for (const k of ["a", "b", "c", "d", "tx", "ty"] as const) expect(m[k]).toBeCloseTo(n[k], 9);
+  };
+
+  it.each([
+    ["e", tf(0, 0, 10, 10, -1, 1), 1, 0.5],     // flipped horizontally, side handle
+    ["w", tf(0, 0, 10, 10, -1.5, 0.8), 0, 0.5],
+    ["n", tf(0, 0, 0, 0, 1, -2), 0.5, 0],       // flipped vertically, top handle
+    ["s", tf(0, 0, 20, 20, 0.5, -1), 0.5, 1],
+  ] as const)("a skew drag of zero on the %s edge of a mirrored node changes nothing", (edge, src, fx, fy) => {
+    const snap = rootSnap(src);
+    const start = cornerWorld(src, fx, fy);
+    sameMatrix(skewLocal(snap, BOX, edge, start, start), src);
+  });
+
+  it("a small skew on a mirrored node keeps it mirrored", () => {
+    const src = tf(0, 0, 0, 0, -1, 1);
+    const snap = rootSnap(src);
+    const start = cornerWorld(src, 1, 0.5);
+    const out = skewLocal(snap, BOX, "e", { x: start.x, y: start.y + 5 }, start);
+    const m = toMatrix(mat(), out);
+    expect(m.a).toBeLessThan(0);                 // column 0 still points left
+  });
+
+  it.each([
+    [1, 0.5, false, true, 0.5],    // ⇧ on a top/bottom edge can shrink
+    [0.4, 1, true, false, 0.4],    // and on a side edge
+    [0.5, 2, true, true, 2],       // a corner takes the larger change
+    [-3, 2, true, true, 3],
+  ])("uniformFactor(%f, %f, %s, %s) = %f", (sx, sy, x, y, want) => {
+    expect(uniformFactor(sx, sy, x, y)).toBe(want);
+  });
+
+  it("⇧ on an edge handle shrinks the object", () => {
+    const src = tf(0, 0, 0, 0, 1, 1);
+    const snap = rootSnap(src);
+    const out = scaleLocal({
+      snap, box: BOX, anchor: { fx: 0.5, fy: 0 }, handle: { fx: 0.5, fy: 1 },
+      pointer: cornerWorld(src, 0.5, 0.5), uniform: true, fromCenter: false,
+    });
+    expect(out.scaleY).toBeCloseTo(0.5, 9);
+  });
+});
+
+describe("bone lengths measured on the stage", () => {
+  it("divides by the bone's world x-scale", async () => {
+    const { localLength } = await import("@/view/tools/boneGeom");
+    expect(localLength(100, matOf(2, 0, 0, 2, 5, 5))).toBeCloseTo(50, 9);
+    expect(localLength(100, matOf(0, 3, -1, 0, 0, 0))).toBeCloseTo(100 / 3, 9);
+    expect(localLength(100, matOf(1, 0, 0, 1, 0, 0))).toBe(100);
+  });
+
+  it("skips bones the filter refuses", async () => {
+    const { pickBoneTip, boneSegment } = await import("@/view/tools/boneGeom");
+    const { createSymbol, createNode, createLayer } = await import("@/core/doc/defaults");
+    const { evaluateSymbol } = await import("@/core/doc/pose");
+    const sym = createSymbol("s");
+    const bone = createNode("bone", "b", { x: 10, y: 10 });
+    sym.nodes[bone.id] = bone;
+    sym.layers.push(createLayer(bone.id, "b", 0));
+    const pose = evaluateSymbol(sym, null, 0, "setup");
+    const tip = boneSegment(pose.byNode.get(bone.id)!);
+    const at = { x: tip.bx, y: tip.by };
+    expect(pickBoneTip(pose, at, 4)).toBe(bone.id);
+    expect(pickBoneTip(pose, at, 4, () => false)).toBeNull();
   });
 });

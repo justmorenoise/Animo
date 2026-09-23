@@ -1,6 +1,7 @@
 import type { DisplayRef, Node, Project } from "./types";
 import { DEFAULT_MOTION_BLUR, DOC_VERSION, type MotionBlurSettings } from "./types";
 import { observeId } from "./ids";
+import { isDefaultExport, sanitizeExportSettings } from "@/core/export/settings";
 import { normalizeMasks } from "./layerTree";
 import { displaysOf } from "./displays";
 import { CURVE_Y_LIMIT, EASE_FAMILIES, TWEEN_CHANNELS, TWEEN_LINEAR, type TweenSpec, } from "@/core/math/easing";
@@ -54,6 +55,11 @@ export function validateProject(raw: unknown): ValidationResult {
       shutter: clampInt(mb?.shutter, 0, 360, DEFAULT_MOTION_BLUR.shutter),
       maxLength: clampInt(mb?.maxLength, 1, 4096, DEFAULT_MOTION_BLUR.maxLength),
     };
+  }
+  if (p.exportSettings !== undefined) {
+    const settings = sanitizeExportSettings(p.exportSettings);
+    if (isDefaultExport(settings)) delete p.exportSettings;
+    else p.exportSettings = settings;
   }
   p.folders ??= {};
   p.itemOrder = Array.isArray(p.itemOrder) ? p.itemOrder.filter((id) => !!p.items[id]) : [];
@@ -215,23 +221,48 @@ export function validateProject(raw: unknown): ValidationResult {
           });
         }
       }
+      // The exporter's frame durations add up to `duration`, so a span that
+      // runs past it would leave the file claiming a shorter animation than
+      // its own timelines.
+      const reach = Math.max(-1, ...Object.values(anim.tracks).map((t) => t?.endFrame ?? -1)) + 1;
+      if (reach > anim.duration) {
+        diagnostics.push({
+          path: `items.${itemId}.animations.${anim.id}`,
+          message: `"${anim.name}" was ${anim.duration} frame(s) long but keyed to frame ${reach - 1}; it now lasts ${reach}`,
+          severity: "warning",
+        });
+        anim.duration = reach;
+      }
     }
 
     // An IK constraint pointing at a missing bone would crash the exporter.
     item.ik = item.ik.filter((k) => !!item.nodes[k.boneId] && !!item.nodes[k.targetId]);
     for (const k of item.ik) observeId(k.id);
-    normalizeMasks(item);
+    const masks = normalizeMasks(item).masks.size;
+    if (masks) {
+      diagnostics.push({
+        path: `items.${itemId}.layers`,
+        message: `${masks} layer(s) had a mask setting that could not work (a missing or misplaced mask, or a mask with nothing to clip); it was cleared`,
+        severity: "warning",
+      });
+    }
   }
 
   p.version = DOC_VERSION;
   return { project: p, diagnostics };
 }
 
-function hasCycle(nodes: Record<string, { id: string; parentId: string | null }>, start: string): boolean {
+/**
+ * True when `start` is ON a parent loop. A chain that merely runs into a loop
+ * further up (A → B → C → B) is not: cutting A would lose a valid link, and
+ * the loop itself is cut when its own members are checked.
+ */
+export function hasCycle(nodes: Record<string, { id: string; parentId: string | null }>, start: string): boolean {
   const seen = new Set<string>();
-  let cur: string | null = start;
+  let cur: string | null = nodes[start]?.parentId ?? null;
   while (cur) {
-    if (seen.has(cur)) return true;
+    if (cur === start) return true;
+    if (seen.has(cur)) return false;
     seen.add(cur);
     cur = nodes[cur]?.parentId ?? null;
   }
@@ -281,6 +312,9 @@ const MIGRATIONS: Record<number, (p: Record<string, unknown>) => Record<string, 
   // 5 -> 6: `Node.extraDisplays`, artwork switched per keyframe. An older
   // build would draw display 0 on every key and export it that way.
   5: (p) => ({ ...p, version: 6 }),
+  // 6 -> 7: `Project.exportSettings`. Additive; an older build would export
+  // at its own defaults and drop the settings on save.
+  6: (p) => ({ ...p, version: 7 }),
 };
 
 /** A tween read from disk, or null when it is not one this build knows. */

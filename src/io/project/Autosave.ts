@@ -53,17 +53,23 @@ export class Autosaver {
     private readonly idleMs = 1_500,
   ) {}
 
+  /** Does nothing when already running. The preferences reach this on every
+   *  write — a view toggle, an onion marker drag — and restarting here threw
+   *  away the save a pending idle timer was about to make. */
   start(): void {
-    this.stop();
+    if (this.timer) return;
     this.timer = window.setInterval(() => this.maybeSave(), this.intervalMs);
   }
 
-  /** Change the period. Restarts the timer when one is already running, so a
-   *  preference change takes effect without waiting out the old interval. */
+  /** Change the period. Restarts the interval when one is already running, so
+   *  a preference change takes effect without waiting out the old one; a
+   *  pending idle save is kept. */
   setInterval(ms: number): void {
     if (ms === this.intervalMs) return;
     this.intervalMs = ms;
-    if (this.timer) this.start();
+    if (!this.timer) return;
+    clearInterval(this.timer);
+    this.timer = window.setInterval(() => this.maybeSave(), this.intervalMs);
   }
 
   stop(): void {

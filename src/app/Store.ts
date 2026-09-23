@@ -7,6 +7,7 @@ import { createProject } from "@/core/doc/defaults";
 import { clampFrame } from "@/core/doc/timeline";
 import { onionSpan, type OnionSpan } from "@/core/doc/onion";
 import { clone, invert, mat, type Matrix2D, mul } from "@/core/math/Matrix2D";
+import { invalidateBounds } from "@/core/doc/pose";
 import { PrefsStore } from "./Prefs";
 
 export type ToolId =
@@ -201,6 +202,11 @@ export class Store {
   }
 
   private onDocChanged(touches: TouchSet): void {
+    // Undoing Convert to Symbol while inside the new symbol deletes it: step
+    // out to what still exists, or the stage keeps drawing through the old
+    // instance's matrix.
+    const depth = validEditDepth(this.ui.editPath, this.project);
+    if (depth < this.ui.editPath.length - 1) this.exitToDepth(depth);
     this.emit("doc");
     if (touches.library) this.emit("library");
     if (touches.timeline) this.emit("timeline");
@@ -254,6 +260,8 @@ export class Store {
    * autosave. Everything derived from the old one has to go with it.
    */
   replaceProject(project: Project): void {
+    // Item ids repeat between documents, and a revert keeps them all.
+    invalidateBounds();
     this.project = project;
     this.history.reset(project);
     this.selection = { nodes: [], items: [], frames: [] };
@@ -578,7 +586,9 @@ export class Store {
 
   /** Pop to a given depth in the breadcrumb. */
   exitToDepth(depth: number): void {
-    if (depth < 0 || depth >= this.ui.editPath.length) return;
+    // The current level too: clicking its own breadcrumb reset the animation
+    // and the playhead to whatever the level had when it was entered.
+    if (depth < 0 || depth >= this.ui.editPath.length - 1) return;
     const back = this.editFrames[depth];
     this.ui.editPath = this.ui.editPath.slice(0, depth + 1);
     this.editMatrices = this.editMatrices.slice(0, depth + 1);
@@ -605,4 +615,10 @@ export class Store {
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/** The deepest level of an edit path whose symbols all still exist. */
+export function validEditDepth(path: readonly ItemId[], project: Project): number {
+  const broken = path.findIndex((id) => !isSymbol(project.items[id]));
+  return broken < 0 ? path.length - 1 : Math.max(0, broken - 1);
 }

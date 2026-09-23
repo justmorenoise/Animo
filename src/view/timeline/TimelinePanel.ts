@@ -35,7 +35,9 @@ import { promptNumber } from "@/view/widgets/promptNumber";
 import { AddAnimation, RemoveAnimation, RenameAnimation, SetAnimationDuration } from "@/core/history/timelineCommands";
 import { AddNode, RemoveNodes, SetLayerExcluded, SetParent } from "@/core/history/commands";
 import { createLayer, createNode } from "@/core/doc/defaults";
-import { layerRows } from "@/core/doc/layerTree";
+import { groupPlan, layerRows } from "@/core/doc/layerTree";
+import { evaluateSymbol } from "@/core/doc/pose";
+import { mayReparent } from "@/view/widgets/ikReparentGuard";
 import { uiPx } from "@/core/prefs/fonts";
 
 /** The timeline: layer column, frame grid, transport. */
@@ -452,29 +454,24 @@ export class TimelinePanel implements Panel {
    */
   addGroup(): void {
     const sym = this.store.currentSymbol;
-    const selected = [...this.store.selection.nodes].filter((id) => sym.nodes[id]);
-
-    // Put the group where the selection is, so its origin is a sensible pivot.
-    let cx = 0, cy = 0;
-    for (const id of selected) {
-      cx += sym.nodes[id]!.bind.x;
-      cy += sym.nodes[id]!.bind.y;
-    }
-    if (selected.length) { cx /= selected.length; cy /= selected.length; }
-
-    const node = createNode("group", uniqueGroupName(this.store), {
-      x: Math.round(cx), y: Math.round(cy),
+    const setup = evaluateSymbol(sym, null, 0, "setup");
+    const plan = groupPlan(sym, this.store.selection.nodes, (id) => {
+      const w = setup.byNode.get(id)?.world;
+      return { x: w?.tx ?? 0, y: w?.ty ?? 0 };
     });
-    // Insert above the topmost selected layer so the group reads as their parent.
-    const topIndex = selected.length
-      ? Math.min(...selected.map((id) => sym.layers.findIndex((l) => l.nodeId === id)).filter((i) => i >= 0))
-      : 0;
+    if (!mayReparent(this.store, plan.members)) return;
+
+    // Put the group where the selection is, so its origin is a sensible pivot,
+    // above the topmost selected layer so it reads as their parent.
+    const node = createNode("group", uniqueGroupName(this.store), {
+      x: plan.origin.x, y: plan.origin.y, parentId: plan.parent,
+    });
     const layer = createLayer(node.id, node.name, sym.layers.length);
 
     this.store.transaction("Group", () => {
-      this.store.apply(new AddNode("Group", this.store.currentSymbolId, node, layer, Math.max(0, topIndex)));
-      if (selected.length) {
-        this.store.apply(new SetParent(this.store.currentSymbolId, selected, node.id));
+      this.store.apply(new AddNode("Group", this.store.currentSymbolId, node, layer, plan.index));
+      if (plan.members.length) {
+        this.store.apply(new SetParent(this.store.currentSymbolId, plan.members, node.id));
       }
     });
     this.store.selectNodes([node.id]);

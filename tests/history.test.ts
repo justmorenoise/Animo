@@ -6,7 +6,9 @@ import { tf } from "@/core/math/Transform";
 import { Store } from "@/app/Store";
 import { applyTransforms, doInsertFrame } from "@/app/TimelineOps";
 import { TWEEN_LINEAR } from "@/core/math/easing";
+import { SetBoneLength } from "@/core/history/ikCommands";
 import {
+  SetBindTransform, SetBindColor,
   SetPivot, SetDocumentSettings, SetNodeMotionBlur, SetParent, AddNode,
 } from "@/core/history/commands";
 import { SetAnimationDuration, EditTracks } from "@/core/history/timelineCommands";
@@ -236,5 +238,118 @@ describe("a scrubbed field is one undo step that redoes to where it ended", () =
     expect(anim.duration).toBe(1);
     store.redo();
     expect(anim.duration).toBe(40);
+  });
+});
+
+describe("dirty tracking", () => {
+  it("an edit after an undo is unsaved, whatever the stack length", () => {
+    const { store, n } = scene();
+    const move = (x: number) =>
+      store.apply(new SetBindTransform(store.currentSymbolId, new Map([[n.id, tf(x, 0)]])));
+    move(10);
+    move(20);
+    store.history.markSaved();
+    store.undo();
+    expect(store.history.isDirty).toBe(true);
+    move(99);                                  // same length as when saved
+    expect(store.history.isDirty).toBe(true);
+    store.undo();
+    expect(store.history.isDirty).toBe(true);  // the saved step is gone for good
+  });
+
+  it("revision moves on apply, merge, undo and redo", () => {
+    const { store, n } = scene();
+    const r0 = store.history.revision;
+    store.history.beginInteraction("node.transform");
+    store.apply(new SetBindTransform(store.currentSymbolId, new Map([[n.id, tf(1, 0)]])));
+    const r1 = store.history.revision;
+    store.apply(new SetBindTransform(store.currentSymbolId, new Map([[n.id, tf(2, 0)]])));
+    store.history.endInteraction();
+    const r2 = store.history.revision;
+    store.undo();
+    const r3 = store.history.revision;
+    store.redo();
+    expect(new Set([r0, r1, r2, r3, store.history.revision]).size).toBe(5);
+  });
+});
+
+describe("merged steps restore every node they touched", () => {
+  function two() {
+    const { store, n } = scene();
+    const sym = store.currentSymbol;
+    const m = createNode("bone", "m", { x: 5, y: 5 });
+    sym.nodes[m.id] = m;
+    sym.layers.push(createLayer(m.id, "m", 1));
+    const b = sym.nodes[n.id]!;
+    b.kind = "bone";
+    b.boneLength = 40;
+    return { store, n, m };
+  }
+
+  it("SetBindTransform: a node only the second step moved goes back on undo", () => {
+    const { store, n, m } = two();
+    const id = store.currentSymbolId;
+    store.history.beginInteraction("x");
+    store.apply(new SetBindTransform(id, new Map([[n.id, tf(10, 0)]])));
+    store.apply(new SetBindTransform(id, new Map([[n.id, tf(20, 0)], [m.id, tf(50, 50)]])));
+    store.history.endInteraction();
+    store.undo();
+    expect(store.currentSymbol.nodes[n.id]!.bind.x).toBe(0);
+    expect(store.currentSymbol.nodes[m.id]!.bind.x).toBe(5);
+    store.redo();
+    expect(store.currentSymbol.nodes[m.id]!.bind.x).toBe(50);
+  });
+
+  it("SetBindColor: same rule", () => {
+    const { store, n, m } = two();
+    const id = store.currentSymbolId;
+    const tint = { aM: 50, rM: 100, gM: 100, bM: 100, aO: 0, rO: 0, gO: 0, bO: 0 };
+    store.history.beginInteraction("c");
+    store.apply(new SetBindColor(id, new Map([[n.id, tint]])));
+    store.apply(new SetBindColor(id, new Map([[n.id, tint], [m.id, tint]])));
+    store.history.endInteraction();
+    store.undo();
+    expect(store.currentSymbol.nodes[m.id]!.color).toBeUndefined();
+  });
+
+  it("SetBoneLength: same rule, and the caller's map is left alone", () => {
+    const { store, n, m } = two();
+    const id = store.currentSymbolId;
+    const first = new Map([[n.id, 60]]);
+    store.history.beginInteraction("l");
+    store.apply(new SetBoneLength(id, first));
+    store.apply(new SetBoneLength(id, new Map([[n.id, 70], [m.id, 80]])));
+    store.history.endInteraction();
+    expect(first.size).toBe(1);
+    store.undo();
+    expect(store.currentSymbol.nodes[n.id]!.boneLength).toBe(40);
+    expect(store.currentSymbol.nodes[m.id]!.boneLength).toBe(40);
+  });
+});
+
+describe("Set Duration", () => {
+  it("keeps a layer that ends early where it ends", () => {
+    const { store, n } = scene();
+    const sym = store.currentSymbol;
+    const m = createNode("group", "m");
+    sym.nodes[m.id] = m;
+    sym.layers.push(createLayer(m.id, "m", 1));
+    const anim = store.currentAnimation!;
+    const key = () => ({ frame: 0, transform: tf(), displayIndex: 0, tween: TWEEN_LINEAR });
+    anim.tracks = {
+      [n.id]: { nodeId: n.id, endFrame: 50, keys: [key()] },
+      [m.id]: { nodeId: m.id, endFrame: 10, keys: [key()] },
+    } as never;
+    anim.duration = 51;
+    store.apply(new SetAnimationDuration(store.currentSymbolId, anim.id, 60));
+    expect(anim.duration).toBe(60);
+    expect(anim.tracks[n.id]!.endFrame).toBe(59);
+    expect(anim.tracks[m.id]!.endFrame).toBe(10);
+    store.undo();
+    expect(anim.duration).toBe(51);
+    expect(anim.tracks[m.id]!.endFrame).toBe(10);
+    store.redo();
+    expect(anim.tracks[n.id]!.endFrame).toBe(59);
+    expect(anim.tracks[m.id]!.endFrame).toBe(10);
   });
 });

@@ -5,6 +5,7 @@ import { tf } from "@/core/math/Transform";
 import { TWEEN_LINEAR, TWEEN_NONE, type TweenSpec } from "@/core/math/easing";
 import type { Track, Keyframe, Node } from "@/core/doc/types";
 import {
+  endAfterResize, resizedEmptyLength,
   insertFrame, insertKeyframe, insertBlankKeyframe, removeFrame, clearKeyframe,
   keyIndexAt, spanIndexAt, occupiesFrame, isTweened, moveKeyframe, moveRange, setEndFrame,
   sampleTransformRaw, sampleColorRaw, spanRange, rotationDelta,
@@ -397,5 +398,33 @@ describe("pasteRun", () => {
     const out = pasteRun(line(), run(500), 2, 9, "overwrite", node);
     expect(at(out)).toEqual([0, 9]);
     expect(out.endFrame).toBe(10);
+  });
+});
+
+describe("endAfterResize", () => {
+  it.each([
+    // [keys, endFrame, from, to, expected]
+    [[0], 50, 51, 60, 59],          // reached the end: follows it out
+    [[0], 50, 51, 30, 29],          // and in
+    [[0, 40], 50, 51, 30, 40],      // never before the last key
+    [[0], 10, 51, 60, 10],          // ended early: stays where it was
+    [[0], 10, 51, 5, 4],            // unless the new end cuts it
+    [[0, 8], 10, 51, 5, 8],
+  ])("keys %j ending %i, %i → %i frames: %i", (keys, end, from, to, want) => {
+    expect(endAfterResize(track(keys, end), from, to)).toBe(want);
+  });
+});
+
+describe("resizedEmptyLength", () => {
+  it.each([
+    // [duration, from, delta, expected]
+    [1, 99, 1, 100],     // F5 far past the end reaches out to it
+    [10, 3, 2, 12],      // inside: grows by the count
+    [10, 8, -5, 8],      // removing 8..12 takes only 8 and 9
+    [10, 2, -3, 7],
+    [10, 10, -3, 10],    // wholly past the end: nothing to take
+    [2, 0, -5, 1],       // never below one frame
+  ])("%i frames, %i, %i → %i", (duration, from, delta, want) => {
+    expect(resizedEmptyLength(duration, from, delta)).toBe(want);
   });
 });

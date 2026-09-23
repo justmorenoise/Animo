@@ -27,6 +27,7 @@ import {
     rotateAbout,
     scaleLocal,
     skewLocal,
+    uniformFactor,
     snapshotOf,
     topmostSelected,
 } from "./transformOps";
@@ -46,6 +47,8 @@ export class FreeTransformTool implements Tool {
   readonly showsGizmo = true;
 
   private active: HandleId | null = null;
+  /** Whether this drag changed anything; a bare click must not write. */
+  private moved = false;
   private snaps: NodeSnapshot[] = [];
   private gizmo: Gizmo | null = null;
   private anchorWorld: Point = { x: 0, y: 0 };
@@ -101,6 +104,7 @@ export class FreeTransformTool implements Tool {
 
     this.gizmo = g;
     this.active = handle;
+    this.moved = false;
     this.startWorld = world;
     this.totalTheta = 0;
     this.lastTheta = 0;
@@ -198,14 +202,15 @@ export class FreeTransformTool implements Tool {
           const spanY = this.startWorld.y - anchor.y;
           let sx = Math.abs(spanX) > 1e-6 ? (world.x - anchor.x) / spanX : 1;
           let sy = Math.abs(spanY) > 1e-6 ? (world.y - anchor.y) / spanY : 1;
-          if (this.active.kind === "scaleEdge") {
-            if (this.active.edge === "n" || this.active.edge === "s") sx = 1;
-            else sy = 1;
-          }
+          const edge = this.active.kind === "scaleEdge" ? this.active.edge : null;
+          const dragsX = edge !== "n" && edge !== "s";
+          const dragsY = edge !== "e" && edge !== "w";
+          if (!dragsX) sx = 1;
+          if (!dragsY) sy = 1;
           if (uniform) {
-            const k = Math.max(Math.abs(sx), Math.abs(sy));
-            if (sx !== 1) sx = Math.sign(sx || 1) * k;
-            if (sy !== 1) sy = Math.sign(sy || 1) * k;
+            const k = uniformFactor(sx, sy, dragsX, dragsY);
+            if (dragsX) sx = Math.sign(sx || 1) * k;
+            if (dragsY) sy = Math.sign(sy || 1) * k;
           }
           const m = matOf(sx, 0, 0, sy, anchor.x * (1 - sx), anchor.y * (1 - sy));
           for (const s of this.snaps) next.set(s.id, applyWorldMatrix(s, m));
@@ -221,12 +226,14 @@ export class FreeTransformTool implements Tool {
       }
 
       case "pivot":
+        this.moved = true;
         this.movePivot(ctx, world);
         ctx.invalidate();
         return;
     }
 
     if (next.size > 0) {
+      this.moved = true;
       applyEdit(ctx.store, next, true);
       ctx.invalidate();
     }
@@ -255,6 +262,9 @@ export class FreeTransformTool implements Tool {
   onPointerUp(_e: PointerEvent, ctx: ToolContext): void {
     ctx.endSnap();
     if (!this.active) return;
+    // A click that moved nothing is not an edit: writing the pose back keyed
+    // the playhead mid-tween and left an undo step for nothing.
+    if (!this.moved) { this.onCancel(ctx); return; }
     if (this.active.kind !== "pivot") {
       const next = new Map<NodeId, Transform>();
       for (const s of this.snaps) {

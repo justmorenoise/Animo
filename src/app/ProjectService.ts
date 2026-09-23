@@ -152,12 +152,19 @@ export class ProjectService {
 
   private async writeTo(ref: FileRef): Promise<boolean> {
     try {
+      const revision = this.store.history.revision;
       const blob = await serializeProject(this.store.project, this.assets);
       await writeFile(ref, blob);
-      this.store.history.markSaved();
-      // The autosave now holds nothing the file does not; left in place, the
-      // next launch offered to "recover" work that was saved.
-      void clearAutosave();
+      if (this.store.history.revision === revision) {
+        this.store.history.markSaved();
+        // The autosave now holds nothing the file does not; left in place, the
+        // next launch offered to "recover" work that was saved.
+        void clearAutosave();
+      } else {
+        // Edited while the file was being written: the file lacks that edit,
+        // so the document is not saved and its autosave must stay.
+        this.store.history.markDirty();
+      }
       this.store.emit("doc");
       void this.remember(ref);
       this.events.onStatus?.(`Saved ${ref.name}`);
@@ -211,6 +218,7 @@ export class ProjectService {
   }
 
   async recover(record: AutosaveRecord): Promise<boolean> {
+    if (!(await this.confirmDiscard())) return false;
     const ok = await this.loadFrom(await record.blob.arrayBuffer(), { name: record.name }, false);
     if (ok) {
       // Recovered work is unsaved by definition. `loadFrom` leaves the history
@@ -222,7 +230,12 @@ export class ProjectService {
     return ok;
   }
 
-  discardRecovery(): void { void clearAutosave(); }
+  /** Clears the record only while it is still the one offered: once this
+   *  session has autosaved, the record is ITS work, not the old tab's. */
+  async discardRecovery(record: AutosaveRecord): Promise<void> {
+    const now = await readAutosave();
+    if (now && now.savedAt === record.savedAt) await clearAutosave();
+  }
 
   private applyAutosavePrefs(enabled: boolean, seconds: number): void {
     this.autosaver.setInterval(seconds * 1000);

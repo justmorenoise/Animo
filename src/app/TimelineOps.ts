@@ -29,6 +29,7 @@ import {
     mapKeyTransforms,
     moveRange,
     removeFrame,
+    resizedEmptyLength,
     sampleColorRaw,
     sampleTransformRaw,
     setEndFrame,
@@ -156,14 +157,7 @@ function stretchEmptyAnimation(store: Store, delta: number, from: number): boole
   const anim = store.currentAnimation;
   if (!anim) return false;
   if (Object.values(anim.tracks).some((t) => !!t)) return false;
-  // Inserting PAST the end reaches out to that frame rather than adding one
-  // frame to the current length: clicking frame 100 on a fresh timeline and
-  // pressing F5 is how Flash makes a hundred frames, and adding 1 to a
-  // duration of 1 left the playhead sitting far outside the animation.
-  const base = delta > 0 ? Math.max(anim.duration, from) : anim.duration;
-  // Removing frames from beyond the end has nothing to remove.
-  if (delta < 0 && from >= anim.duration) return true;
-  const next = Math.max(1, base + delta);
+  const next = resizedEmptyLength(anim.duration, from, delta);
   if (next !== anim.duration) {
     store.apply(new SetAnimationDuration(store.currentSymbolId, anim.id, next));
     store.emit("timeline");
