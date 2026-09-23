@@ -1,0 +1,427 @@
+/* ── Modal windows ──────────────────────────────────────────────────────────
+   The editor's only dialog surface. Above .popmenu (1000) and the floating
+   panels (which start at z-index 400), because a modal is the one thing that
+   must not be behind anything.                                              */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.modal-box {
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.modal-bar {
+  display: flex; align-items: center; gap: 6px;
+  height: var(--h-tabstrip);
+  padding: 0 4px 0 8px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--line);
+}
+.modal-bar .spacer { flex: 1 1 auto; }
+.modal-title { color: var(--fg-strong); font-weight: 600; }
+
+.modal-body { flex: 1 1 auto; min-height: 0; display: flex; }
+
+.modal-foot {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-panel-alt);
+  border-top: 1px solid var(--line);
+}
+.modal-foot .spacer { flex: 1 1 auto; }
+
+.btn {
+  height: calc(22px * var(--ui-scale));
+  padding: 0 12px;
+  color: var(--fg);
+  background: var(--bg-header);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  cursor: default;
+}
+.btn:hover { background: var(--hover); }
+.btn.primary { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+
+/* ── Preferences ─────────────────────────────────────────────────────────── */
+
+.settings { flex: 1 1 auto; min-height: 0; }
+.set-split {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  min-height: 0;
+  width: 100%;
+}
+
+.set-cats {
+  overflow-y: auto;
+  padding: 4px 0;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line);
+}
+.set-cat {
+  padding: 4px 10px;
+  color: var(--fg);
+  cursor: default;
+  outline: none;
+}
+.set-cat:hover { background: var(--hover); }
+.set-cat.on { background: var(--bg-header); color: var(--fg-strong); }
+.set-cat:focus-visible { box-shadow: inset var(--focus-ring); }
+
+.set-pane { overflow-y: auto; padding: 8px 12px 14px; }
+
+.set-section {
+  margin-bottom: 12px;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+.set-legend {
+  margin: -14px 0 6px -4px;
+  padding: 0 5px;
+  width: max-content;
+  color: var(--fg-dim);
+  background: var(--bg-panel);
+}
+
+/* Labels here are sentences ("Object edges and centres"), not the two-letter
+   glyphs the Properties panel packs into 62px. */
+.settings .prow { grid-template-columns: 210px minmax(0, 1fr); }
+.settings .prow > label { text-align: left; white-space: normal; }
+.settings .prow .field { width: 110px; }
+.settings .prow input[type="checkbox"] { margin: 0; }
+
+.settings .pnote {
+  margin: 6px 0 2px;
+  padding: 6px 7px;
+  border-left: 2px solid var(--accent);
+  background: var(--hover);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+/* Swatch plus opacity: half the stage palette is translucent by design. */
+.colorfield { display: flex; align-items: center; gap: 4px; }
+.colorfield .swatch {
+  width: 34px; height: var(--h-field);
+  padding: 0 1px;
+  background: var(--bg-field);
+  border: 1px solid #262626;
+  border-radius: var(--radius);
+  cursor: default;
+}
+.colorfield .alpha { width: 46px; }
+.colorfield .glyph { color: var(--fg-dim); }
+
+/* A one-field dialog — the guide coordinate, and whatever else stops being a
+   `prompt()` next. */
+.modal-form { flex: 1 1 auto; padding: 14px 16px; }
+.modal-form .prow { grid-template-columns: 90px minmax(0, 1fr); }
+.modal-form .prow > label { text-align: left; }
+.modal-form .field { width: 120px; }
+
+/* ── Ease panel ──────────────────────────────────────────────────────────── */
+.ease-dlg {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 120px 130px minmax(0, 1fr);
+  min-height: 0;
+  width: 100%;
+}
+.ease-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line);
+}
+.ease-head {
+  padding: 4px 10px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--line);
+}
+.ease-list { overflow-y: auto; padding: 2px 0; }
+.ease-row {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  color: var(--fg);
+  cursor: default;
+}
+.ease-row:hover { background: var(--hover); }
+.ease-row.on { background: var(--bg-header); color: var(--fg-strong); }
+.ease-row.disabled { color: var(--fg-disabled); background: none; }
+.ease-mark { margin-left: auto; color: var(--accent); font-size: var(--fs-xxs); }
+.ease-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 8px 10px;
+}
+.ease-bar { display: flex; align-items: center; gap: 12px; min-height: calc(20px * var(--ui-scale)); }
+.ease-amount { display: flex; align-items: center; gap: 6px; }
+.ease-amount-label { color: var(--fg-dim); }
+.ease-amount .field { width: 70px; }
+.ease-graph {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: crosshair;
+}
+.ease-hint { color: var(--fg-dim); font-size: var(--fs-sm); min-height: calc(14px * var(--ui-scale)); }
+.ease-info { color: var(--fg-dim); font-size: var(--fs-sm); }
+
+/* ── Shortcuts ───────────────────────────────────────────────────────────── */
+
+.settings .set-pane:has(.sc-list) { display: flex; flex-direction: column; }
+.sc-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.sc-bar .spacer { flex: 1 1 auto; }
+.sc-search { width: 220px; height: calc(22px * var(--ui-scale)); }
+.sc-list { margin-top: 12px; }
+.sc-empty { padding: 20px; color: var(--fg-dim); text-align: center; }
+
+.sc-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 16px;
+  align-items: center;
+  gap: 8px;
+  min-height: calc(24px * var(--ui-scale));
+}
+.sc-row:hover { background: var(--hover); }
+.sc-row.changed .sc-label { color: var(--fg-strong); }
+.sc-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.sc-reset { color: var(--accent); text-align: center; }
+.sc-reset.hidden { visibility: hidden; }
+.sc-reset:hover { color: var(--fg-strong); }
+
+.key-pill, .km-keys kbd, .km-status kbd {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: calc(18px * var(--ui-scale));
+  padding: 0 6px;
+  font: var(--font-mono);
+  color: var(--fg-strong);
+  background: var(--bg-field);
+  border: 1px solid var(--line-soft);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.key-pill .key-text { cursor: pointer; }
+.key-pill .key-del { color: var(--fg-dim); cursor: pointer; }
+.key-pill .key-del:hover { color: var(--fg-strong); }
+.key-pill.warn, .km-keys kbd.warn { border-color: color-mix(in srgb, var(--warn) 72%, #000); }
+.key-warn { color: var(--accent-hot); }
+.key-pill.recording {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+.key-add {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--fg-dim);
+  border: 1px dashed var(--line-soft);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.key-add:hover { color: var(--fg-strong); border-color: var(--fg-dim); }
+
+.sc-msg {
+  display: flex; align-items: center; gap: 8px;
+  margin: 2px 0 6px;
+  padding: 4px 7px;
+  border-left: 2px solid var(--accent-blue);
+  background: var(--hover);
+}
+.sc-msg > span { flex: 1 1 auto; }
+.sc-msg .btn { height: calc(20px * var(--ui-scale)); padding: 0 8px; }
+.sc-msg.warn { border-left-color: var(--accent-hot); color: var(--fg); }
+.sc-msg.error { border-left-color: #d0504a; color: #ffb8b3; }
+
+/* ── Keyboard Shortcuts window ──────────────────────────────────────────── */
+
+.km { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; padding: 10px 12px 0; }
+.km-find.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); outline: none; }
+.km-check { display: flex; align-items: center; gap: 4px; color: var(--fg-dim); }
+.km-status:not(:empty) { margin-bottom: 8px; padding: 6px 8px; background: var(--hover); }
+.km-note.reserved { color: #ffb8b3; }
+.km-note.browser { color: var(--accent-hot); }
+.km-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: 12px; }
+.km-cols { columns: 2 260px; column-gap: 18px; }
+.km-group { break-inside: avoid; margin-bottom: 12px; }
+.km-cat {
+  margin-bottom: 3px;
+  padding-bottom: 2px;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--line-soft);
+}
+.km-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; align-items: center; min-height: calc(22px * var(--ui-scale)); }
+.km-keys { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.km-suffix { color: var(--fg-dim); }
+
+/* Help ▸ Runtime Extensions — see view/help/ExtensionHelp.ts */
+.exthelp {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+  line-height: 1.5;
+}
+.exthelp p { margin: 0 0 10px; }
+.exthelp h4 {
+  margin: 16px 0 6px;
+  font-size: var(--fs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+.exthelp-head { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.exthelp-head svg { color: var(--accent); }
+.exthelp-id { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--fg-strong); }
+.exthelp-tag {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--line);
+  color: var(--fg-dim);
+}
+.exthelp-tag.req { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.exthelp-code {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: auto;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: var(--fs);
+  line-height: 1.45;
+  white-space: pre;
+}
+.exthelp-note { margin-top: 10px; color: var(--fg-dim); }
+
+/* ── Help ▸ About ────────────────────────────────────────────────────────── */
+/* See view/help/AboutDialog.ts. */
+.about {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 22px 16px;
+  line-height: 1.5;
+}
+.about p { margin: 0 0 8px; }
+.about h4 {
+  margin: 20px 0 6px;
+  font-size: var(--fs);
+  font-weight: 600;
+  color: var(--fg-strong);
+}
+
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+/* The app icon's artwork is the rounded square, so the radius only matches it. */
+.about-icon {
+  width: calc(72px * var(--ui-scale));
+  height: calc(72px * var(--ui-scale));
+  margin-bottom: 6px;
+  border-radius: calc(16px * var(--ui-scale));
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.45);
+}
+.about-icon svg { display: block; width: 100%; height: 100%; }
+.about-name { color: var(--fg-strong); font-size: var(--fs-title); font-weight: 700; line-height: 1.15; }
+.about-tag { color: var(--fg); }
+.about-ver {
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
+}
+
+/* The byline as one clickable strip. The Morenoise mark is drawn for light
+   backgrounds, so the white disc is what makes it readable on the dark chrome. */
+.about-maker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-panel-alt);
+  color: var(--fg);
+  text-decoration: none;
+}
+.about-maker:hover { border-color: var(--accent-blue); }
+.about-mark {
+  flex: none;
+  width: calc(30px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  padding: calc(3px * var(--ui-scale));
+  border-radius: 50%;
+  background: #fff;
+}
+.about-mark svg { display: block; width: 100%; height: 100%; }
+.about-maker-text { display: flex; flex-direction: column; line-height: 1.25; }
+.about-maker-by { color: var(--fg-dim); font-size: var(--fs-sm); }
+.about-maker-name { color: var(--fg-strong); font-weight: 600; }
+.about-maker-url { margin-left: auto; color: var(--accent-blue); font-size: var(--fs-sm); }
+
+.about-links { display: flex; justify-content: center; gap: 18px; margin: 12px 0 0; }
+.about-link { color: var(--accent-blue); text-decoration: none; }
+.about-link:hover { text-decoration: underline; }
+
+.about-exts { display: flex; gap: 6px; margin: 2px 0 0; }
+.btn.small { height: calc(20px * var(--ui-scale)); padding: 0 8px; font-size: var(--fs-sm); }
+
+.about-credits { margin: 0; padding: 0; list-style: none; }
+.about-credits li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.about-credits li:last-child { border-bottom: 0; }
+.about-credit-name { color: var(--accent-blue); text-decoration: none; }
+.about-credit-name:hover { text-decoration: underline; }
+.about-lic {
+  align-self: center;
+  padding: 0 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--fg-dim);
+  font-size: var(--fs-xs);
+}
+.about-credit-what { grid-column: 1 / -1; color: var(--fg-dim); font-size: var(--fs-sm); }
+
+.about-lic-links { color: var(--fg-dim); }
+.about-note { margin-top: 14px; color: var(--fg-dim); font-size: var(--fs-sm); }

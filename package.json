@@ -1,0 +1,36 @@
+{
+  "name": "animo",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A Flash-style animation editor that exports DragonBones",
+  "license": "AGPL-3.0-or-later",
+  "author": "Moreno Tomasella <info@morenoise.it> (https://morenoise.it)",
+  "homepage": "https://morenoise.it/en/apps/animo",
+  "repository": { "type": "git", "url": "git+https://github.com/justmorenoise/animo.git" },
+  "bugs": { "url": "https://github.com/justmorenoise/animo/issues" },
+  "keywords": [
+    "animation",
+    "dragonbones",
+    "pixijs",
+    "skeletal-animation",
+    "2d-animation",
+    "editor"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ag-psd": "^31.0.2",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.4"
+  }
+}

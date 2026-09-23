@@ -1,0 +1,18 @@
+name: Feature request
+description: Something Animo should be able to do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The animation you are trying to make, not the feature you think you need.
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you work around it today

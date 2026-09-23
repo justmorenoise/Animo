@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in the editor does not do what it says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the **stage and the preview disagree**, say so explicitly: that
+        narrows it to the exporter immediately.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, what you expected instead.
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. New project
+        2. Import an image, drop it on the stage
+        3. ...
+    validations: { required: true }
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 140 on macOS 15
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Animo version
+      description: Help ▸ About Animo ▸ Copy version info
+    validations: { required: true }
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Anything the browser console printed. Optional.
+      render: text

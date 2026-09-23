@@ -1,0 +1,204 @@
+/* ── Timeline ─────────────────────────────────────────────────────────────
+   Left: layer list (DOM rows). Right: frame grid (single canvas, drawn).
+   The two scroll vertically in lockstep.                                   */
+
+.tl { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+
+/* The timeline fills its panel body exactly, so the only thing that ever
+   scrolls vertically is the layer list — the transport bar has to stay on the
+   bottom edge and reachable. Without this the panel body (`overflow: auto`)
+   sizes to the layers instead, and a rig with two dozen of them pushes the bar
+   below the fold, where Play, the animation picker and the zoom slider can
+   only be reached by scrolling the whole panel. */
+.pbody > .tl { height: 100%; }
+
+.tl-main {
+  display: grid;
+  grid-template-columns: var(--tl-layers, 186px) 5px 1fr;
+  /* One row, explicitly allowed to be shorter than its content: a grid item's
+     automatic minimum size would otherwise hold the row open at the full
+     height of the layer list and there would be nothing left to scroll. */
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg-sunken);
+}
+
+/* ── Layer column ───────────────────────────────────────────────────────── */
+.tl-layers {
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  background: var(--bg-panel);
+}
+
+.tl-lhead {
+  display: flex; align-items: center;
+  height: var(--h-section); flex: none;
+  padding: 0 4px;
+  background: var(--bg-panel-alt);
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-dim);
+}
+.tl-lhead .onion { display: flex; align-items: center; gap: 4px; }
+.tl-lhead .flags { display: flex; gap: 0; margin-left: auto; }
+.tl-lhead .flags .iconbtn { width: 18px; height: 18px; }
+.tl-lhead .flags svg { width: 11px; height: 11px; }
+
+.tl-llist {
+  flex: 1 1 auto; overflow: hidden auto; scrollbar-width: none;
+  /* Matches FrameGrid.bottomGutter: the frame grid's horizontal scrollbar is
+     an overlay along its bottom edge, so both columns reserve the same strip
+     and the last row stays fully visible. */
+  padding-bottom: 14px;
+}
+.tl-llist::-webkit-scrollbar { display: none; }
+
+.tl-layer {
+  display: flex; align-items: center; gap: 4px;
+  height: var(--tl-row, 20px);
+  padding: 0 4px 0 5px;
+  border-bottom: 1px solid rgba(0,0,0,0.22);
+  color: var(--fg);
+}
+.tl-layer:hover { background: var(--hover); }
+.tl-layer.selected { background: var(--accent-row); color: var(--accent-row-ink); }
+.tl-layer .kind { width: 12px; height: 12px; flex: none; opacity: 0.85; }
+
+/* Mask layers. The tint on the icon is what tells a mask apart from a group
+   at a glance; the left rule ties a masked row to the mask above it. */
+.tl-layer.mask .kind { opacity: 1; color: var(--accent); }
+.tl-layer.masked .kind { opacity: 1; color: var(--accent); }
+.tl-layer.masked { box-shadow: inset 2px 0 0 -1px var(--accent); }
+/* An empty layer holds a place in the stack and carries nothing yet. */
+/* The two IK colours are the stage's own (`Overlay`'s `ikTarget` and
+   `boneIk`): a green handle, a blue chain. The row and the thing on the
+   stage have to be recognisable as one object, since the layer tree cannot
+   show the link — a target is parented outside the chain it drives. */
+.tl-layer.iktarget .kind { opacity: 1; color: #4fca8f; }
+.tl-layer.ikdriven .kind { opacity: 1; color: #6bb8ee; }
+
+.tl-layer.emptylayer .kind { opacity: 0.5; }
+.tl-layer.emptylayer .name { font-style: italic; opacity: 0.75; }
+
+/* Excluded from export: still on the stage, absent from the file. */
+.tl-layer.noexport .name { opacity: 0.5; text-decoration: line-through; }
+.tl-layer .noexport { flex: none; width: 11px; height: 11px; color: var(--warn); }
+
+.tl-layer .name {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tl-layer .name input {
+  width: 100%; height: calc(15px * var(--ui-scale)); font: inherit;
+  background: var(--bg-field); color: var(--fg-strong);
+}
+.tl-layer .indent { flex: none; }
+
+/* the little ◀ ● ▶ parent-nav cluster Animate shows on the active layer */
+.tl-layer .nav { display: none; align-items: center; gap: 2px; flex: none; color: rgba(255,255,255,0.85); }
+.tl-layer.selected .nav { display: flex; }
+.tl-layer .nav i { width: 9px; height: 9px; display: block; }
+
+/* Hidden / locked show an icon; the ordinary state shows nothing at all, so
+   the two marks that mean something are the only marks in the column. The
+   cell keeps its width either way — it is still the click target. */
+.tl-layer .dot {
+  width: 16px; height: 100%; flex: none;
+  display: grid; place-items: center;
+  color: var(--fg-dim);
+}
+.tl-layer .dot.on { color: var(--fg-strong); }
+.tl-layer .dot svg { width: 11px; height: 11px; display: block; }
+.tl-layer:hover .dot:not(.on)::after {
+  content: ""; width: 4px; height: 4px; border-radius: 50%;
+  background: rgba(255,255,255,0.22);
+}
+
+/* ── Frame grid ─────────────────────────────────────────────────────────── */
+.tl-frames { position: relative; min-width: 0; overflow: hidden; background: var(--bg-sunken); }
+.tl-frames canvas { position: absolute; inset: 0; display: block; }
+.tl-frames .hscroll {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 11px;
+  overflow-x: auto; overflow-y: hidden;
+}
+.tl-frames .hscroll > div { height: 1px; }
+
+/* ── Footer toolbar ─────────────────────────────────────────────────────── */
+.tl-foot {
+  display: flex; align-items: center; gap: 1px;
+  padding: 2px 4px;
+  height: calc(24px * var(--ui-scale)); flex: none;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line);
+}
+.tl-foot .readout {
+  display: flex; align-items: baseline; gap: 7px;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+/* The frame number opens Go to Frame, so it has to look and behave like a
+   target: three digits of text is otherwise a 12px-wide button nobody would
+   guess at. */
+.tl-foot .readout .cur {
+  color: var(--accent-hot);
+  cursor: pointer;
+  padding: 1px 4px; margin: 0 -2px;
+  border-radius: 3px;
+  min-width: 22px; text-align: center;
+}
+.tl-foot .readout .cur:hover { background: var(--hover); }
+.tl-foot .readout .fps, .tl-foot .readout .elapsed { color: var(--fg-dim); }
+.tl-foot .readout .elapsed { color: var(--accent-hot); opacity: 0.75; }
+.tl-foot .readout .tween {
+  height: calc(16px * var(--ui-scale));
+  padding: 0 5px;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--fs-sm);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: default;
+}
+.tl-foot .readout .tween:hover { color: var(--fg-strong); border-color: var(--line-soft); background: var(--hover); }
+.tl-foot .readout .tween:empty { display: none; }
+
+.tl-zoom { display: flex; align-items: center; gap: 5px; padding: 0 6px; }
+.tl-zoom input[type="range"] {
+  appearance: none; width: 84px; height: 3px; border-radius: 2px;
+  background: #2c2c2c; outline: none;
+}
+.tl-zoom input[type="range"]::-webkit-slider-thumb {
+  appearance: none; width: 9px; height: 13px; border-radius: 2px;
+  background: #c2c2c2;
+  border: 1px solid #2a2a2a;
+}
+.tl-zoom .mark { color: var(--fg-dim); font-size: var(--fs-xs); }
+
+.tl-anim { max-width: 120px; height: var(--h-field); }
+.tl-foot .readout .fps { font-size: var(--fs-sm); }
+.tl-main { --tl-layers: 186px; }
+.tl-frames { cursor: default; }
+
+/* ── Layer tree ─────────────────────────────────────────────────────────── */
+.tl-layer .ltri {
+  width: 9px; height: 9px; flex: none;
+  position: relative;
+  cursor: default;
+}
+.tl-layer .ltri:not(.leaf)::before {
+  content: "";
+  position: absolute; left: 1px; top: 1px;
+  border-left: 4px solid var(--fg-dim);
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform-origin: 25% 50%;
+  transition: transform 90ms ease;
+}
+.tl-layer .ltri.open:not(.leaf)::before { transform: rotate(90deg); }
+.tl-layer.selected .ltri:not(.leaf)::before { border-left-color: rgba(255, 255, 255, 0.85); }
+
+/* A group is a container, not content: dimmer name, folder icon. */
+.tl-layer.group .name { color: var(--fg-dim); }
+.tl-layer.group.selected .name { color: var(--accent-row-ink); }
+.tl-layer.group .kind { opacity: 1; color: #d3b06a; }

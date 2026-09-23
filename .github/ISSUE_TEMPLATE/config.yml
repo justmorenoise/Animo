@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/justmorenoise/animo/discussions
+    about: Ask here rather than opening an issue.
+  - name: Security report
+    url: https://github.com/justmorenoise/animo/security/advisories/new
+    about: Report a vulnerability privately.

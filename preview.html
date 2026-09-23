@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DragonBones Preview</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #333; }
+      #err {
+        position: absolute; inset: 0; padding: 10px 12px; display: none;
+        font: 11px/1.5 "SF Mono", Menlo, monospace; color: #ff8a80;
+        background: #2b2b2b; white-space: pre-wrap; overflow: auto;
+      }
+    </style>
+    <!-- Classic scripts, in this order: the DragonBones Pixi build binds to
+         the global PIXI at load time. -->
+    <script src="/vendor/pixi.js"></script>
+    <script src="/vendor/dragonBones.min.js"></script>
+  </head>
+  <body>
+    <div id="err"></div>
+    <script type="module" src="/src/preview/previewClient.ts"></script>
+  </body>
+</html>

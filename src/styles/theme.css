@@ -1,0 +1,201 @@
+/* ── Animo — Adobe Animate-inspired dark chrome ───────────────
+   Palette sampled from the Animate CC reference screenshots. Every surface
+   is a token so the whole app can be re-skinned from this one block.        */
+
+:root {
+  /* Surfaces, darkest → lightest */
+  --bg-app:        #2b2b2b;   /* window chrome behind everything          */
+  --bg-menubar:    #333333;
+  --bg-rail:       #383838;   /* icon rails (tools, collapsed docks)      */
+  --bg-panel:      #3c3c3c;   /* panel body — the dominant surface        */
+  --bg-panel-alt:  #414141;   /* alternating rows, sub-sections           */
+  --bg-header:     #464646;   /* panel tab strip / section headers        */
+  --bg-field:      #2e2e2e;   /* text & number inputs                     */
+  --bg-stage:      #535353;   /* pasteboard around the artboard           */
+  --bg-sunken:     #333333;   /* wells, frame-grid background             */
+
+  /* Lines */
+  --line:          #2a2a2a;   /* hard separators between regions          */
+  --line-soft:     #4e4e4e;   /* interior hairlines                       */
+  --line-grid:     #383838;   /* timeline frame grid                      */
+
+  /* Text */
+  --fg:            #cfcfcf;
+  --fg-strong:     #f0f0f0;
+  --fg-dim:        #8f8f8f;
+  --fg-disabled:   #6a6a6a;
+
+  /* Accents. Every one of these is a preference: `view/prefs/theme.ts`
+     rewrites them on the root element, and the literals here are the same
+     values as `DEFAULT_PREFS.interface` — they are what the first frame is
+     painted with, before that runs. The `-rgb` triplets and the two `-ink`
+     text colours are DERIVED from the three above them and never edited
+     directly. */
+  --accent:         #00bcd9;       /* Animate's teal — selection, active tool */
+  --accent-rgb:     0, 188, 217;
+  --accent-ink:     #1c1c1c;       /* text ON --accent, by contrast          */
+  --accent-row:     #006b86;       /* selected timeline / library row         */
+  --accent-row-ink: #ffffff;
+  --accent-hot:     #2ccde6;       /* editable numeric values                 */
+  --accent-hot-rgb: 44, 205, 230;
+  --accent-blue:    #4a90d9;       /* focus rings, links                      */
+  --playhead:       #e8483f;
+  --setup:          #4fd1c5;       /* Setup-pose mode: the switch, stage edge */
+  --tween:          #6f74a8;       /* motion-tween span fill                  */
+  --tween-line:     #9ba0d4;
+  --warn:           #d89a2e;       /* warnings, the no-export badge           */
+
+  /* Interaction */
+  --hover:         rgba(255, 255, 255, 0.07);
+  --active:        rgba(0, 0, 0, 0.25);
+  --focus-ring:    0 0 0 1px var(--accent-blue);
+
+  /* Interface ▸ Text. `applyTheme` publishes this ONE number and every
+     measure below is a calc() on it, so at the default it is exactly the
+     literal it always was. It scales TEXT and the boxes built to hold text —
+     --w-rail, the icon sizes and the hairlines stay put, because scaling
+     those means redrawing every SVG. */
+  --ui-scale: 1;
+
+  /* Metrics — compact, Animate-like */
+  --h-menubar:     calc(26px * var(--ui-scale));
+  --h-tabstrip:    calc(23px * var(--ui-scale));
+  --h-section:     calc(22px * var(--ui-scale));
+  --h-row:         calc(22px * var(--ui-scale));
+  --h-field:       calc(18px * var(--ui-scale));
+  --w-rail:        30px;
+  --radius:        2px;
+  --pad:           6px;
+
+  /* Text. Every `font-size` in the app is one of these tokens; a literal
+     would not follow Interface ▸ Text. */
+  --font-family:      "Helvetica Neue", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --fs-xxs:   calc(7px * var(--ui-scale));   /* the ease marker                                */
+  --fs-xs:    calc(9px * var(--ui-scale));   /* zoom marks, the smallest labels                */
+  --fs-sm:   calc(10px * var(--ui-scale));   /* secondary text: glyphs, accelerators, notes    */
+  --fs:      calc(11px * var(--ui-scale));   /* the base                                       */
+  --fs-lg:   calc(12px * var(--ui-scale));   /* document tabs                                  */
+  --fs-xl:   calc(13px * var(--ui-scale));   /* the tab's close glyph                          */
+  --fs-title: calc(22px * var(--ui-scale));  /* the app name in About                          */
+  --fs-mono: calc(10px * var(--ui-scale));
+
+  --font:      var(--fs)/1.45 var(--font-family);
+  --font-mono: var(--fs-mono)/1.4 var(--font-mono-family);
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font: var(--font);
+  color: var(--fg);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: var(--bg-sunken); }
+::-webkit-scrollbar-thumb {
+  background: #5c5c5c;
+  border: 2px solid var(--bg-sunken);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: #6e6e6e; }
+::-webkit-scrollbar-corner { background: var(--bg-sunken); }
+
+/* ── Generic controls ───────────────────────────────────────────────────── */
+button {
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+button:disabled { color: var(--fg-disabled); pointer-events: none; }
+
+.btn {
+  height: var(--h-field);
+  padding: 0 8px;
+  background: linear-gradient(#5a5a5a, #4c4c4c);
+  border: 1px solid #2f2f2f;
+  border-radius: var(--radius);
+}
+.btn:hover { background: linear-gradient(#666, #575757); }
+.btn:active { background: #3f3f3f; }
+
+/* Square icon button used in every panel footer / rail */
+.iconbtn {
+  display: grid;
+  place-items: center;
+  width: var(--h-row);
+  height: var(--h-row);
+  border-radius: var(--radius);
+  color: #b4b4b4;
+  flex: none;
+}
+.iconbtn:hover { background: var(--hover); color: var(--fg-strong); }
+.iconbtn:active { background: var(--active); }
+.iconbtn.on { background: var(--active); color: var(--accent); }
+.iconbtn svg { width: 14px; height: 14px; display: block; fill: none;
+               stroke: currentColor; stroke-width: 1.4;
+               stroke-linecap: round; stroke-linejoin: round; }
+.iconbtn.filled svg { fill: currentColor; stroke: none; }
+
+input[type="text"], input[type="number"], select {
+  font: inherit;
+  height: var(--h-field);
+  min-width: 0;
+  color: var(--fg-strong);
+  background: var(--bg-field);
+  border: 1px solid #262626;
+  border-radius: var(--radius);
+  padding: 0 4px;
+}
+input:focus, select:focus { outline: none; box-shadow: var(--focus-ring); }
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 12px; height: 12px;
+  background: var(--bg-field);
+  border: 1px solid #565656;
+  border-radius: 1px;
+  display: grid; place-items: center;
+  flex: none;
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 6px; height: 3px;
+  border: 1.5px solid var(--fg-strong);
+  border-top: none; border-right: none;
+  transform: rotate(-45deg) translate(0.5px, -1px);
+}
+
+/* Scrubbable numeric value — dotted-underlined, in the bright accent */
+.numval {
+  color: var(--accent-hot);
+  border-bottom: 1px dotted rgba(var(--accent-hot-rgb), 0.5);
+  cursor: ew-resize;
+  padding: 0 1px;
+  font-variant-numeric: tabular-nums;
+}
+.numval:hover { color: color-mix(in srgb, var(--accent-hot) 78%, #fff); }
+.numval.editing { border-bottom-color: transparent; }
+
+.hint { color: var(--fg-dim); }
+.sep-v { width: 1px; align-self: stretch; margin: 3px 4px; background: var(--line-soft); }
+.spacer { flex: 1 1 auto; }
+
+[hidden] { display: none !important; }

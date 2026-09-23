@@ -1,0 +1,263 @@
+/* ── Shell: menu bar, tool rail, stage, docks, timeline ───────────────────── */
+
+/* #app stacks a full-width banner above the shell; the shell itself is the
+   grid. Putting the banner inside the grid would drop it into an implicit
+   cell and squeeze it into a corner. */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.shell {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: var(--w-rail) 1fr auto auto;
+  grid-template-rows: var(--h-menubar) var(--h-tabstrip) 1fr auto;
+  grid-template-areas:
+    "menubar menubar menubar menubar"
+    "doctabs doctabs doctabs doctabs"
+    "tools   stage   dockR   railR"
+    "tools   bottom  dockR   railR";
+  background: var(--bg-app);
+}
+
+/* ── Menu bar ───────────────────────────────────────────────────────────── */
+.menubar {
+  grid-area: menubar;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--bg-menubar);
+  border-bottom: 1px solid var(--line);
+}
+.menubar .brand {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-right: 10px;
+  padding: 0 5px 0 3px;
+  height: calc(20px * var(--ui-scale));
+  border-radius: var(--radius);
+  font-size: var(--fs-lg);
+}
+.menubar .brand-mark {
+  display: block;
+  flex: none;
+  width: calc(17px * var(--ui-scale));
+  height: calc(17px * var(--ui-scale));
+}
+.menubar .brand-mark svg { display: block; width: 100%; height: 100%; }
+.menubar .brand:hover { background: var(--hover); }
+.menu-item { padding: 0 8px; height: calc(20px * var(--ui-scale)); line-height: calc(20px * var(--ui-scale)); border-radius: var(--radius); }
+.menu-item:hover, .menu-item.open { background: var(--hover); color: var(--fg-strong); }
+
+/* ── Document tab strip ─────────────────────────────────────────────────── */
+.doctabs {
+  grid-area: doctabs;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--line);
+}
+.doctab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line);
+  color: var(--fg-strong);
+}
+.doctab .close { color: var(--fg-dim); font-size: var(--fs-xl); line-height: 1; }
+.doctab .close:hover { color: var(--fg-strong); }
+
+/* ── Tool rail (left) ───────────────────────────────────────────────────── */
+.tools {
+  grid-area: tools;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 0;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+.tools .tool {
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: var(--radius);
+  color: #bfbfbf;
+  position: relative;
+  flex: none;
+}
+.tools .tool:hover { background: var(--hover); color: var(--fg-strong); }
+.tools .tool.active { background: #5a5a5a; color: var(--accent); box-shadow: inset 0 0 0 1px #6b6b6b; }
+.tools .tool svg { width: 16px; height: 16px; fill: none; stroke: currentColor;
+                   stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.tools .tool.filled svg { fill: currentColor; stroke: none; }
+.tools .rule { width: 18px; height: 1px; background: var(--line-soft); margin: 4px 0; flex: none; }
+
+/* ── Stage region ───────────────────────────────────────────────────────── */
+.stage-region {
+  grid-area: stage;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.stage-bar {
+  display: flex; align-items: center; gap: 6px;
+  height: var(--h-section);
+  padding: 0 6px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.crumb { display: flex; align-items: center; gap: 4px; }
+.crumb .step { padding: 0 4px; border-radius: var(--radius); color: var(--fg); }
+.crumb .step:hover { background: var(--hover); }
+.crumb .step.current { color: var(--fg-strong); }
+.crumb .chev { color: var(--fg-dim); }
+
+.stage-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--bg-stage);
+  overflow: hidden;
+}
+.stage-host canvas { position: absolute; inset: 0; display: block; }
+
+/* The coordinate readout that follows the pointer while a guide is placed or
+   moved — the ruler is at the far edge of the stage, which is the reading the
+   guide is being placed to avoid. */
+.guide-tip {
+  position: absolute;
+  z-index: 5;
+  padding: 1px 5px;
+  background: rgba(20, 20, 20, 0.88);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--fg-strong);
+  font: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.guide-tip.doomed { color: #ff8a80; }
+
+/* Play mode: the runtime iframe covers the stage and the editable canvases
+   step aside. `visibility`, not `display`, because the Viewport's
+   ResizeObserver would measure a display:none canvas as 0x0. */
+.stage-host.playing canvas { visibility: hidden; }
+
+/* ── Bottom dock (timeline) ─────────────────────────────────────────────── */
+.bottom {
+  grid-area: bottom;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: var(--bg-panel);
+  min-height: 0;
+}
+
+/* ── Right dock ─────────────────────────────────────────────────────────── */
+.dock-right {
+  grid-area: dockR;
+  display: flex;
+  flex-direction: column;
+  width: 268px;
+  min-width: 180px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line);
+  min-height: 0;
+}
+.dock-right.collapsed { display: none; }
+
+.rail-right {
+  grid-area: railR;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  width: var(--w-rail);
+  background: var(--bg-rail);
+  border-left: 1px solid var(--line);
+}
+
+/* ── Splitters ──────────────────────────────────────────────────────────── */
+.splitter { background: transparent; flex: none; z-index: 5; }
+.splitter.h { height: 5px; margin: -2px 0; cursor: ns-resize; }
+.splitter.v { width: 5px; margin: 0 -2px; cursor: ew-resize; }
+.splitter:hover { background: rgba(var(--accent-rgb), 0.35); }
+.splitter.dragging { background: var(--accent); }
+
+/* Vertical splitter sitting between stage and right dock */
+.shell > .splitter.v {
+  grid-area: dockR;
+  justify-self: start;
+  height: 100%;
+  width: 5px;
+  margin-left: -3px;
+}
+
+body.resizing-ns, body.resizing-ns * { cursor: ns-resize !important; }
+body.resizing-ew, body.resizing-ew * { cursor: ew-resize !important; }
+
+/* Stage bar right-hand controls */
+.stage-toggles { display: flex; align-items: center; gap: 1px; }
+.zoomsel {
+  width: 68px;
+  height: var(--h-field);
+  background: var(--bg-field);
+  border: 1px solid #262626;
+  color: var(--fg-strong);
+}
+.doctabs .docname { white-space: nowrap; }
+.tools .rule + .rule { display: none; }
+/* The stage takes keyboard focus for shortcuts; it should not show a ring. */
+.stage-host:focus, .stage-host:focus-visible { outline: none; }
+
+/* ── Play mode transport ────────────────────────────────────────────────── */
+.stage-play { display: flex; align-items: center; }
+.playsw { display: flex; align-items: center; gap: 4px; }
+.playsw .seg {
+  display: flex; align-items: center; justify-content: center;
+  width: calc(30px * var(--ui-scale)); height: var(--h-field);
+  color: var(--fg-dim);
+  background: var(--bg-field);
+  border: 1px solid #262626;
+  border-radius: var(--radius);
+}
+.playsw .seg:hover { color: var(--fg-strong); }
+.playsw .seg.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+/* Scene / Symbol: a word, not an icon — which of the two is running is not
+   something a glyph can say unambiguously. */
+.playsw .seg.scope {
+  width: auto; padding: 0 7px; font-size: var(--fs-sm); letter-spacing: 0.02em;
+}
+.playsw select { height: var(--h-field); max-width: 130px; }
+
+/* ── Setup / Animate switch ─────────────────────────────────────────────── */
+.modesw { display: flex; align-items: center; border-radius: var(--radius); overflow: hidden; }
+.modesw .seg {
+  height: var(--h-field); padding: 0 9px;
+  color: var(--fg-dim);
+  background: var(--bg-field);
+  border: 1px solid #262626;
+  font-size: var(--fs);
+}
+.modesw .seg + .seg { border-left: none; }
+.modesw .seg:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.modesw .seg:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.modesw .seg:hover { color: var(--fg-strong); }
+.modesw .seg.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+/* Setup is the unusual mode to be in, so it says so in its own colour — the
+   same one the stage edge uses. */
+.modesw.setup .seg.on { background: var(--setup); border-color: var(--setup); }
