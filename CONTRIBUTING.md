@@ -56,6 +56,14 @@ Contributor Licence Agreement** before their first PR is merged:
 [CLA.md](CLA.md). It is short, it does not take your copyright away, and it is
 the same arrangement Qt, Grafana and Elastic use.
 
+Signing takes one comment. On your first pull request a bot links the CLA and
+asks you to reply with:
+
+    I have read the CLA Document and I hereby sign the CLA
+
+The signature is recorded once and covers all your future pull requests. Until
+then the CLA check stays red and the PR cannot be merged.
+
 If you would rather not sign, open an issue describing the change instead. A
 good bug report is worth as much as a patch.
 
