@@ -1555,6 +1555,9 @@ Measured before moving anything; what blocked the page and where it went:
 | Zip of a 64 MB project, level 6 | ~620 ms | images stored (`zipLevelFor`), fflate's async zip on workers |
 | PSD decode (ag-psd is synchronous) | seconds on a large file | `io/workers/psd.worker.ts` |
 | PSD import redraw | 22 redraws, ~300 ms | one: a transaction notifies once, when it closes |
+| Trim boxes, cold preview build, 40 images of 2048 px | 1616 ms blocked, longest stall 747 ms | 161 ms, longest 88 ms: `io/workers/trim.worker.ts` decodes and scans off the page |
+| Autosave of a 134k-key document | 817 ms, 584 ms blocked | 296 ms, 143 ms blocked: `project.json` written compact |
+| Open, restoring 40 images | 196 ms | 75 ms: six decode side by side, warnings still in manifest order |
 
 - `io/workers/WorkerPool.ts`: a worker answers `{ok, value}` or `{ok:false, error}`.
   A failed task rejects with an Error; a worker that dies rejects with
@@ -1565,6 +1568,26 @@ Measured before moving anything; what blocked the page and where it went:
   main thread.
 - The resampled copies are cached as promises per asset, size and filter, and a
   build asks for all of them before packing, so the pool runs them side by side.
+- **Trim** is the one step that read every pixel on the page (`getImageData` and `alphaBounds`
+  over each image). `pretrim` (`AtlasBuilder.ts`) sends the encoded image to a worker pool and
+  fills `trimCache` before the packing loop, which then finds it. Only unscaled builds use it: a
+  scaled build trims the resampled copy, already in memory. A worker that cannot start, or fails on
+  one picture, leaves that image to the page; the answer is used only if the decoded size is the
+  size the library item states.
+- **Autosave is compact.** The indent is most of `project.json`, and an autosave is read once by
+  the editor. A file the user saves keeps the indent (`serializeProject(…, { pretty })`).
+- **Measuring.** `app/perf.ts` records timings of the operations that can hold the page up
+  (`project.serialize`, `project.deserialize`, `atlas.pretrim/trim/pack/render/encode`,
+  `export.build`, `store.replaceProject`, `autosave.snapshot`); `animoPerf.report()` in the console
+  prints them. `dev/bench.ts` (dev server only, `await animoBench.runBench({ preset: "large",
+  images: 40, size: 2048 })`) builds a synthetic document, runs each scenario and reports both
+  wall time and the **long tasks** (over 50 ms) the browser saw, which is the lag a user feels;
+  `BUDGETS` says what each step must stay under. Read the stalls, not the wall time: PNG encoding
+  takes seconds and blocks nothing. Run the bench in a visible pane, never two at once, and give
+  the garbage collector a second between scenarios: a collector pause is otherwise booked to
+  whatever ran next.
+- Not moved, on purpose: the stage (`SceneRenderer`, `Viewport`) reads the DOM and the document,
+  and `JSON.stringify` of even 134k keys takes 53 ms compact.
 - `vite.config.ts` builds workers as ES modules (`worker.format`): the IIFE
   default cannot split chunks.
 - WASM was not worth it: the loops are typed-array code already close to native,

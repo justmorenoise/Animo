@@ -6,6 +6,7 @@ import type { Command, TouchSet } from "@/core/history/Command";
 import { createProject } from "@/core/doc/defaults";
 import { clampFrame } from "@/core/doc/timeline";
 import { onionSpan, type OnionSpan } from "@/core/doc/onion";
+import { perf } from "./perf";
 import { clone, invert, mat, type Matrix2D, mul } from "@/core/math/Matrix2D";
 import { invalidateBounds } from "@/core/doc/pose";
 import { PrefsStore } from "./Prefs";
@@ -260,6 +261,10 @@ export class Store {
    * autosave. Everything derived from the old one has to go with it.
    */
   replaceProject(project: Project): void {
+    perf.measure("store.replaceProject", () => this.replace(project));
+  }
+
+  private replace(project: Project): void {
     // Item ids repeat between documents, and a revert keeps them all.
     invalidateBounds();
     this.project = project;

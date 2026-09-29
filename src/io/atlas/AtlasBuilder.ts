@@ -1,3 +1,5 @@
+import { perf } from "@/app/perf";
+import { type TrimReply, trimOffThread } from "@/io/workers/trim";
 import { DEFAULT_PACK, type PackOptions, type PackPage, packRects } from "@/core/atlas/MaxRectsPacker";
 import type { ItemId } from "@/core/doc/ids";
 import { AtlasTooSmall, type Oversized, regionFits } from "@/core/atlas/oversize";
@@ -118,6 +120,35 @@ function trimOf(
   return trim;
 }
 
+/**
+ * Find the trim box of every unscaled image on workers, before the loop that
+ * uses them: it then finds them cached and never reads a pixel on the page.
+ * Anything a worker cannot do is left for that loop, which trims as before.
+ */
+export async function pretrim(
+  items: readonly ImageItem[], assets: AssetStore, opts: AtlasOptions,
+  trimmer: (blob: Blob, threshold: number) => Promise<TrimReply | null> = trimOffThread,
+): Promise<void> {
+  if (!opts.trim || opts.scale < 1) return;
+  const wanted = new Map<Asset, ImageItem>();
+  for (const item of items) {
+    const asset = assets.get(item.assetId);
+    if (!asset || item.noTrim) continue;
+    const key = `${opts.alphaThreshold}|${item.width}x${item.height}|1`;
+    if (trimCache.get(asset)?.has(key) || wanted.has(asset)) continue;
+    wanted.set(asset, item);
+  }
+  await perf.measureAsync("atlas.pretrim", () => Promise.all([...wanted].map(async ([asset, item]) => {
+    // A picture the worker cannot read is still one the page has decoded.
+    const reply = await Promise.resolve().then(() => trimmer(asset.blob, opts.alphaThreshold)).catch(() => null);
+    // A different size means it did not read the picture the item describes.
+    if (!reply || reply.width !== item.width || reply.height !== item.height) return;
+    let byKey = trimCache.get(asset);
+    if (!byKey) trimCache.set(asset, (byKey = new Map()));
+    byKey.set(`${opts.alphaThreshold}|${item.width}x${item.height}|1`, reply.trim);
+  })));
+}
+
 /** Resampled copies per asset, per size and filter, as promises: the
  *  resampling runs on workers, and two builds asking at once share one. */
 type Scaled = { canvas: HTMLCanvasElement; data: ImageData } | null;
@@ -170,6 +201,7 @@ export async function buildAtlas(
   onProgress: (fraction: number) => void = () => {},
 ): Promise<AtlasPage[]> {
   if (items.length === 0) return [];
+  const started = performance.now();
   const key = atlasKey(items, atlasName, fileBase, opts);
   const used = items.map((i) => assets.get(i.assetId));
   if (lastBuild && lastBuild.key === key && lastBuild.assets.length === used.length
@@ -189,6 +221,9 @@ export async function buildAtlas(
     }));
   }
 
+  await pretrim(items, assets, opts);
+
+  const trimStart = performance.now();
   // Trim, and deduplicate by content so a repeated image is packed once.
   const entries: Entry[] = [];
   const byKey = new Map<string, Entry>();
@@ -220,6 +255,8 @@ export async function buildAtlas(
     if (!byKey.has(key)) byKey.set(key, entry);
   }
 
+  perf.record("atlas.trim", performance.now() - trimStart);
+
   // Checked here rather than left to the packer, which only knows region
   // keys: the user needs the images by name, and every one of them at once.
   const oversized = new Map<ItemId, Oversized>();
@@ -235,9 +272,9 @@ export async function buildAtlas(
     height: e.trim.height + opts.extrude * 2,
   }));
   // One page per image, named after it, or as few pages as fit.
-  const pages = opts.layout === "perImage"
+  const pages = perf.measure("atlas.pack", () => opts.layout === "perImage"
     ? regions.flatMap((r) => packRects([r], opts))
-    : packRects(regions, opts);
+    : packRects(regions, opts));
   const stems = pageStems(pages.map((pg) => byKey.get(pg.rects[0]!.id)!.item.name), fileBase, opts.layout);
 
   const out: AtlasPage[] = [];
@@ -247,8 +284,8 @@ export async function buildAtlas(
     const stem = stems[p]!;
     const placed = new Map(page.rects.map((r) => [r.id, r]));
 
-    const canvas = renderPage(page, placed, byKey, opts);
-    const blob = await encodePage(canvas, opts);
+    const canvas = perf.measure("atlas.render", () => renderPage(page, placed, byKey, opts));
+    const blob = await perf.measureAsync("atlas.encode", () => encodePage(canvas, opts));
     onProgress((scaling ? 0.5 : 0) + ((scaling ? 0.5 : 1) * (p + 1)) / pages.length);
 
     // Every entry whose region landed on THIS page gets a SubTexture, even
@@ -288,6 +325,7 @@ export async function buildAtlas(
   }
 
   lastBuild = { key, assets: used, pages: out };
+  perf.record("atlas.build", performance.now() - started);
   return out;
 }
 

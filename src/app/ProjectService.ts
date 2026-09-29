@@ -15,6 +15,7 @@ import {
 import { clearRecents, listRecents, type RecentEntry, rememberRecent, } from "@/io/project/Recents";
 import { Autosaver, type AutosaveRecord, clearAutosave, readAutosave, } from "@/io/project/Autosave";
 import { type RunBusy, runQuietly } from "./busy";
+import { perf } from "./perf";
 
 export interface ProjectServiceEvents {
   onLoaded?(diagnostics: Diagnostic[]): void;
@@ -50,10 +51,11 @@ export class ProjectService {
     const general = store.prefs.value.general;
     this.autosaver = new Autosaver(
       () => this.store.history.isDirty,
-      async () => ({
-        blob: await serializeProject(this.store.project, this.assets),
+      () => perf.measureAsync("autosave.snapshot", async () => ({
+        // Compact: nobody reads the autosave, and indenting it was most of its cost.
+        blob: await serializeProject(this.store.project, this.assets, { pretty: false }),
         name: this.fileName,
-      }),
+      })),
       general.autosaveSeconds * 1000,
     );
     this.store.subscribe((topic) => {

@@ -57,7 +57,12 @@ export class AssetStore {
     const bitmap = await decode(blob);
     const asset: Asset = { id, name, width: bitmap.width, height: bitmap.height, bitmap, blob };
     this.assets.set(id, asset);
-    this.byHash.set(await hashBlob(blob), id);
+    // Two ids can hold the same pixels. Which one a later import of them reuses
+    // must not depend on which finished decoding first, as they now restore
+    // side by side: the lowest id stands.
+    const hash = await hashBlob(blob);
+    const held = this.byHash.get(hash);
+    if (held === undefined || !this.assets.has(held) || id < held) this.byHash.set(hash, id);
     observeId(id);
     return asset;
   }

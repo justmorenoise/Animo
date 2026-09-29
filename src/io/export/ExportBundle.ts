@@ -1,3 +1,4 @@
+import { perf } from "@/app/perf";
 import { strToU8 } from "fflate";
 import { zipFiles } from "@/io/zip";
 import type { Project } from "@/core/doc/types";
@@ -29,13 +30,19 @@ export interface ExportResult {
  * one `<name>_tex.json` + `<name>_tex.png` (or `.webp`) per atlas page, as the
  * document's export settings ask.
  */
-export async function buildExport(
+export function buildExport(
   project: Project,
   assets: AssetStore,
   opts: AtlasOptions = atlasOptionsFor(exportSettingsOf(project)),
   onProgress?: (fraction: number) => void,
 ): Promise<ExportResult> {
-  const exported = exportSkeleton(project);
+  return perf.measureAsync("export.build", () => buildExportUntimed(project, assets, opts, onProgress));
+}
+
+async function buildExportUntimed(
+  project: Project, assets: AssetStore, opts: AtlasOptions, onProgress?: (fraction: number) => void,
+): Promise<ExportResult> {
+  const exported = perf.measure("export.skeleton", () => exportSkeleton(project));
   const { skeleton, diagnostics, usedImages } = exported;
 
   const items = usedImages
