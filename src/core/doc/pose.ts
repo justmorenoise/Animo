@@ -414,20 +414,68 @@ export function displaySize(project: Project, node: Node, display = 0): { w: num
   return { w: 0, h: 0 };
 }
 
-/**
- * Content bounds of a symbol in its own space, memoised. Invalidated by
- * `invalidateBounds` whenever a command touches the symbol — this cache is
- * the real implementation cost of "edit the library item, every instance
- * updates".
- */
-const boundsCache = new Map<string, { w: number; h: number; x: number; y: number }>();
-/** The cache keys holding each item's bounds, so invalidating one item does
- *  not scan the whole cache. */
-const keysByItem = new Map<ItemId, Set<string>>();
-/** Library item -> the symbols whose cached bounds were measured through it.
- *  Editing a symbol, or replacing an image, changes the bounds of everything
- *  that contains it. */
-const usedBy = new Map<ItemId, Set<ItemId>>();
+type Bounds = { w: number; h: number; x: number; y: number };
+
+/** One project's measurements. Item ids repeat between documents, so the
+ *  cache is per `Project` and two open documents never read each other's. */
+class BoundsCache {
+  readonly bounds = new Map<string, Bounds>();
+  /** The cache keys holding each item's bounds, so invalidating one item does
+   *  not scan the whole cache. */
+  readonly keysByItem = new Map<ItemId, Set<string>>();
+  /** Library item -> the symbols whose cached bounds were measured through it.
+   *  Editing a symbol, or replacing an image, changes the bounds of everything
+   *  that contains it. */
+  readonly usedBy = new Map<ItemId, Set<ItemId>>();
+
+  clear(): void {
+    this.bounds.clear();
+    this.keysByItem.clear();
+    this.usedBy.clear();
+  }
+
+  remember(id: ItemId, key: string, value: Bounds): void {
+    if (this.bounds.size >= BOUNDS_CACHE_MAX) {
+      const oldest = this.bounds.keys().next().value!;
+      this.bounds.delete(oldest);
+      this.keysByItem.get(oldest.slice(0, oldest.indexOf("|")) as ItemId)?.delete(oldest);
+    }
+    this.bounds.set(key, value);
+    let keys = this.keysByItem.get(id);
+    if (!keys) this.keysByItem.set(id, (keys = new Set()));
+    keys.add(key);
+  }
+
+  invalidate(ids: ItemId[]): void {
+    const queue = [...ids];
+    const seen = new Set<ItemId>();
+    while (queue.length) {
+      const id = queue.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      for (const key of this.keysByItem.get(id) ?? []) this.bounds.delete(key);
+      this.keysByItem.delete(id);
+      const parents = this.usedBy.get(id);
+      this.usedBy.delete(id);
+      if (parents) queue.push(...parents);
+    }
+  }
+}
+
+const caches = new WeakMap<Project, BoundsCache>();
+/** Every live cache, for an invalidation that does not name its project.
+ *  Weak, so a closed document's cache goes with its project. */
+const liveCaches = new Set<WeakRef<BoundsCache>>();
+
+function cacheOf(project: Project): BoundsCache {
+  let cache = caches.get(project);
+  if (!cache) {
+    caches.set(project, (cache = new BoundsCache()));
+    liveCaches.add(new WeakRef(cache));
+  }
+  return cache;
+}
+
 /** Scrubbing a timeline adds a key per frame; the oldest go first. */
 const BOUNDS_CACHE_MAX = 512;
 
@@ -438,46 +486,35 @@ function boundsKey(id: ItemId, ctx: FrameContext): string {
   return `${id}|${animation}|${ctx.frame}`;
 }
 
-function remember(id: ItemId, key: string, bounds: { w: number; h: number; x: number; y: number }): void {
-  if (boundsCache.size >= BOUNDS_CACHE_MAX) {
-    const oldest = boundsCache.keys().next().value!;
-    boundsCache.delete(oldest);
-    keysByItem.get(oldest.slice(0, oldest.indexOf("|")) as ItemId)?.delete(oldest);
-  }
-  boundsCache.set(key, bounds);
-  let keys = keysByItem.get(id);
-  if (!keys) keysByItem.set(id, (keys = new Set()));
-  keys.add(key);
-}
-
 /** Drop the cached bounds of `ids` and of every symbol containing them;
- *  everything without `ids`. */
-export function invalidateBounds(ids?: ItemId[]): void {
-  if (!ids) {
-    boundsCache.clear();
-    keysByItem.clear();
-    usedBy.clear();
+ *  everything without `ids`. Without `project`, every open document is
+ *  affected, which over-invalidates when ids happen to repeat and is never
+ *  wrong. */
+export function invalidateBounds(ids?: ItemId[], project?: Project): void {
+  if (project) {
+    const cache = caches.get(project);
+    if (cache) ids ? cache.invalidate(ids) : cache.clear();
     return;
   }
-  const queue = [...ids];
-  const seen = new Set<ItemId>();
-  while (queue.length) {
-    const id = queue.pop()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    for (const key of keysByItem.get(id) ?? []) boundsCache.delete(key);
-    keysByItem.delete(id);
-    const parents = usedBy.get(id);
-    usedBy.delete(id);
-    if (parents) queue.push(...parents);
+  for (const ref of liveCaches) {
+    const cache = ref.deref();
+    if (!cache) { liveCaches.delete(ref); continue; }
+    ids ? cache.invalidate(ids) : cache.clear();
   }
 }
 
+/**
+ * Content bounds of a symbol in its own space, memoised. Invalidated by
+ * `invalidateBounds` whenever a command touches the symbol — this cache is
+ * the real implementation cost of "edit the library item, every instance
+ * updates".
+ */
 export function symbolBounds(
   project: Project, id: ItemId, ctx: FrameContext = SETUP_CONTEXT, depth = 0,
 ): { x: number; y: number; w: number; h: number } {
+  const cache = cacheOf(project);
   const key = boundsKey(id, ctx);
-  const hit = boundsCache.get(key);
+  const hit = cache.bounds.get(key);
   if (hit) return hit;
   const empty = { x: 0, y: 0, w: 0, h: 0 };
   if (depth > 10) return empty;              // depth cap guards hand-edited cycles
@@ -494,8 +531,8 @@ export function symbolBounds(
     const item = project.items[e.display.itemId];
     let w = 0, h = 0, ox = 0, oy = 0;
     if (item) {
-      let parents = usedBy.get(item.id);
-      if (!parents) usedBy.set(item.id, (parents = new Set()));
+      let parents = cache.usedBy.get(item.id);
+      if (!parents) cache.usedBy.set(item.id, (parents = new Set()));
       parents.add(id);
     }
     if (isImage(item)) { w = item.width; h = item.height; }
@@ -519,6 +556,6 @@ export function symbolBounds(
   const out = Number.isFinite(minX)
     ? { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
     : empty;
-  remember(id, key, out);
+  cache.remember(id, key, out);
   return out;
 }

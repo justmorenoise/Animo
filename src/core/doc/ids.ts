@@ -13,7 +13,8 @@ export type FolderId = Brand<string, "FolderId">;
 /**
  * Seedable id generator. Deterministic by default so exporter golden files
  * and parity fixtures reproduce byte-for-byte; `reseed` is what test setup
- * calls between cases.
+ * calls between cases. The app never reseeds: the counter only moves forward,
+ * so an id minted for one open document is not minted again for another.
  */
 let counter = 0;
 export function reseed(at = 0): void { counter = at; }

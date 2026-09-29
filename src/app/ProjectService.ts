@@ -1,7 +1,6 @@
 import type { Store } from "./Store";
 import type { AssetStore } from "./AssetStore";
 import { createProject } from "@/core/doc/defaults";
-import { reseed } from "@/core/doc/ids";
 import { invalidateBounds } from "@/core/doc/pose";
 import type { Diagnostic } from "@/core/doc/schema";
 import { deserializeProject, PROJECT_EXTENSION, serializeProject, } from "@/io/project/ProjectFile";
@@ -124,7 +123,6 @@ export class ProjectService {
    *  word — and clear the autosave that could have brought it back. */
   async newProject(name = "Untitled"): Promise<boolean> {
     if (!(await this.confirmDiscard())) return false;
-    reseed();
     this.assets.clear();
     invalidateBounds();
     const p = this.store.prefs.value.general;
