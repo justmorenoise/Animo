@@ -19,6 +19,10 @@ export const APP_TAGLINE = "A Flash-style animation editor that exports DragonBo
 export const APP_VERSION: string =
   typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
+/** The commit the build came from, to tell two builds of one version apart. */
+export const APP_COMMIT: string | null =
+  typeof __APP_COMMIT__ === "string" ? __APP_COMMIT__ : null;
+
 export const AUTHOR = "Morenoise";
 export const AUTHOR_URL = "https://morenoise.it";
 export const REPO_URL = "https://github.com/justmorenoise/animo";

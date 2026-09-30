@@ -6,7 +6,7 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/justmorenoise/animo/actions/workflows/ci.yml/badge.svg)](https://github.com/justmorenoise/animo/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-771-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-782-brightgreen.svg)](tests)
 
 [Website](https://morenoise.it/en/apps/animo) · [Architecture](docs/ARCHITECTURE.md) · [Contributing](CONTRIBUTING.md)
 

@@ -725,6 +725,21 @@ only the API surface actually called. Three things about it that are not obvious
 - The runtime reports `VERSION === "5.7.000"`; the "6.0.2" on the npm package is the Pixi-8 wrapper's
   version. Same build.
 
+## Version numbers
+
+`package.json` holds MAJOR.MINOR; the patch of a build counts commits since the last `v*` tag,
+read by `git describe` in vite.config.ts and turned into a version by `versionFrom`
+(`core/version.ts`, table-tested). With `v1.0.0` tagged, the commit after it builds as 1.0.1,
+the next as 1.0.2, and no file is rewritten per commit (a hook raising `package.json` on every
+commit would add a change to each one and a conflict to every merge). The About dialog shows the
+version, and the commit's short hash in its tooltip and in Copy version info; uncommitted changes
+build as `+dirty`.
+
+- A new minor or major: raise `package.json` (`npm version 1.1.0 --no-git-tag-version`), commit,
+  tag the commit `v1.1.0`. Until the tag exists, builds report the package's number.
+- CI checks out the whole history (`fetch-depth: 0`); a shallow clone has no tag to count from and
+  reports the package's number. A source tarball, with no git at all, does the same.
+
 ## Keyboard shortcuts
 
 One registry, `core/keys/commands.ts`: every command a key can reach, with its

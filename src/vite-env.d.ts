@@ -6,3 +6,5 @@
  * substitutes it; `core/about.ts` is the only reader and handles that.
  */
 declare const __APP_VERSION__: string | undefined;
+/** The short hash of the commit built, or null outside git; see `core/version.ts`. */
+declare const __APP_COMMIT__: string | null | undefined;

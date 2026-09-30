@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The whole history and its tags: the build's version counts commits
+          # since the last tag (src/core/version.ts).
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22

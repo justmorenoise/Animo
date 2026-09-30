@@ -7,7 +7,7 @@ import animoSvg from "@/assets/animo-logo.svg?raw";
 // in the lockup is a grey smudge. The name is right beside it as real text.
 import logoSvg from "@/assets/morenoise-mark.svg?raw";
 import {
-  APP_NAME, APP_TAGLINE, APP_VERSION, AUTHOR, AUTHOR_URL, CREDITS,
+  APP_COMMIT, APP_NAME, APP_TAGLINE, APP_VERSION, AUTHOR, AUTHOR_URL, CREDITS,
   DRAGONBONES_NOTE, LICENSE_ID, LICENSE_NOTE, PIXI_NOTE, REPO_URL, SITE_URL,
   SPONSOR_URL, TRADEMARK_NOTE,
 } from "@/core/about";
@@ -38,7 +38,7 @@ export function openAbout(): void {
     appIcon,
     h("div", { class: "about-name" }, APP_NAME),
     h("div", { class: "about-tag" }, APP_TAGLINE),
-    h("span", { class: "about-ver" }, `Version ${APP_VERSION}`),
+    h("span", { class: "about-ver", title: APP_COMMIT ? `Commit ${APP_COMMIT}` : "" }, `Version ${APP_VERSION}`),
   ));
 
   body.appendChild(h("a", {
@@ -92,7 +92,7 @@ export function openAbout(): void {
   const copy = h("button", { class: "btn" }, "Copy version info");
   on(copy, "pointerup", () => {
     const text = [
-      `${APP_NAME} ${APP_VERSION}`,
+      `${APP_NAME} ${APP_VERSION}${APP_COMMIT ? ` (${APP_COMMIT})` : ""}`,
       APP_TAGLINE,
       ...CREDITS.map((c) => `${c.name}${c.version ? ` ${c.version}` : ""} (${c.license})`),
       navigator.userAgent,
