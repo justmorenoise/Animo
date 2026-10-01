@@ -210,9 +210,9 @@ Stated plainly, because a feature list that quietly omits these is worse than us
 - **Tint offsets do not survive.** `PixiSlot` applies only the colour multipliers, so Flash's
   additive Tint is not reproducible. The exporter warns if a document carries offsets.
 
-## Animo Desktop
+## Animo Pro
 
-A desktop edition is in the works, and it pays for the work on this one: video and
+A paid desktop edition is in the works, and it pays for the work on this one: video and
 spritesheet export, extra export formats, and an MCP server so an agent can drive the
 editor. It will be at [morenoise.it](https://morenoise.it/en/apps/animo). Everything you see
 in this repository stays free and open source.
