@@ -19,7 +19,7 @@ import {
     applyTween,
     type ChannelEases,
     easeOf,
-    type EaseSpec,
+    type TweenSpec,
     splitTween,
     TWEEN_NONE,
     type TweenChannel
@@ -360,7 +360,9 @@ function cutKeepingEase(track: Track, frame: number, node: Node): Track | null {
   const b = track.keys[i + 1];
   if (!next || !a || !b || a.tween.kind === "none") return next;
 
-  const split = (spec: EaseSpec) => splitTween(spec, b.frame - a.frame, frame - a.frame);
+  const split = (spec: TweenSpec): [TweenSpec, TweenSpec] | null => (spec.kind === "none"
+    ? [spec, spec]
+    : splitTween(spec, b.frame - a.frame, frame - a.frame));
   const tween = split(a.tween);
   const eases = a.eases ? Object.entries(a.eases).map(([ch, spec]) => [ch, split(spec)] as const) : [];
   if (!tween || eases.some(([, halves]) => !halves)) return next;

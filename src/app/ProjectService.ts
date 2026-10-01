@@ -14,7 +14,10 @@ import {
 } from "@/io/project/FileSystem";
 import { clearRecents, listRecents, type RecentEntry, rememberRecent, } from "@/io/project/Recents";
 import { Autosaver, type AutosaveRecord, clearAutosave, readAutosave, } from "@/io/project/Autosave";
-import { type RunBusy, runQuietly } from "./busy";
+import { phase, type RunBusy, runQuietly } from "./busy";
+import { readDbFiles } from "@/io/import/dbReader";
+import { buildDbImport, type DbImageRef } from "@/core/doc/dbImport";
+import type { AssetId } from "@/core/doc/ids";
 import { perf } from "./perf";
 
 export interface ProjectServiceEvents {
@@ -217,6 +220,62 @@ export class ProjectService {
     }
   }
 
+  // ── DragonBones ────────────────────────────────────────────────────────
+
+  /**
+   * File ▸ Open DragonBones…: a DragonBones project (a zip, or the skeleton,
+   * atlas and pages) as a new document, unsaved, as File ▸ New makes one.
+   * The files are read and the document built once BEFORE the open one's
+   * assets are let go, so a file that is refused leaves the work as it was.
+   * Returns what was dropped or changed on the way, or null when nothing opened.
+   */
+  async openDragonBones(files: File[], asked = false): Promise<string[] | null> {
+    if (!files.length || (!asked && !(await this.confirmDiscard()))) return null;
+    const general = this.store.prefs.value.general;
+    const defaults = {
+      width: general.newDocWidth, height: general.newDocHeight,
+      frameRate: general.newDocFps, background: general.newDocBackground,
+    };
+    try {
+      const { project, warnings, name } = await this.busy(`Opening ${files[0]!.name}`, async (report) => {
+        const read = await readDbFiles(files, phase(report, 0, 0.7));
+        const input = { name: read.name, skeleton: read.skeleton, extensions: read.extensions, defaults };
+        const stand = new Map<string, DbImageRef>(read.images.map((i) => [i.name, { assetId: i.name as AssetId, width: i.width, height: i.height }]));
+        buildDbImport({ ...input, images: stand });
+
+        // The open document keeps its images if registering the new ones fails.
+        const kept = this.assets.all();
+        this.assets.clear();
+        try {
+          const images = new Map<string, DbImageRef>();
+          const registered = phase(report, 0.7, 1);
+          for (const [n, img] of read.images.entries()) {
+            const asset = await this.assets.addFromBlob(img.blob, img.name);
+            images.set(img.name, { assetId: asset.id, width: img.width, height: img.height });
+            registered((n + 1) / read.images.length);
+          }
+          const built = buildDbImport({ ...input, images });
+          return { ...built, warnings: [...read.warnings, ...built.warnings], name: read.name };
+        } catch (err) {
+          this.assets.clear();
+          for (const a of kept) await this.assets.addWithId(a.id, a.blob, a.name);
+          throw err;
+        }
+      });
+      invalidateBounds();
+      this.store.replaceProject(project);
+      this.ref = null;
+      // Nothing on disk holds it yet.
+      this.store.history.markDirty();
+      this.onProjectReplaced();
+      this.events.onStatus?.(warnings.length ? `Opened ${name} with ${warnings.length} note(s)` : `Opened ${name}`);
+      return warnings;
+    } catch (err) {
+      this.events.onStatus?.(`Could not open: ${message(err)}`, true);
+      return null;
+    }
+  }
+
   // ── Recovery ───────────────────────────────────────────────────────────
 
   /** An autosave newer than the last clean save means the tab died. */
@@ -248,6 +307,9 @@ export class ProjectService {
     this.autosaver.setInterval(seconds * 1000);
     if (enabled) this.autosaver.start(); else this.autosaver.stop();
   }
+
+  /** Whether unsaved work may go, asked as Open asks: before a picker. */
+  mayDiscard(): Promise<boolean> { return this.confirmDiscard(); }
 
   private async confirmDiscard(): Promise<boolean> {
     if (!this.store.history.isDirty) return true;

@@ -46,6 +46,7 @@ export const COMMANDS: CommandDef[] = [
   // takes ⌥⌘N instead.
   c("File", "file.new", "New Project", ["Mod+Alt+N"], true),
   c("File", "file.open", "Open…", ["Mod+O"], true),
+  c("File", "file.openDragonBones", "Open DragonBones…"),
   c("File", "file.save", "Save", ["Mod+S"], true),
   c("File", "file.saveAs", "Save As…", ["Mod+Shift+S"], true),
   c("File", "file.importImages", "Import Images…", ["Mod+R"]),

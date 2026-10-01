@@ -207,7 +207,7 @@ export function validateProject(raw: unknown): ValidationResult {
             const eases: Record<string, unknown> = {};
             for (const ch of TWEEN_CHANNELS) {
               const e = sanitizeTween((k.eases as Record<string, unknown>)?.[ch]);
-              if (e && e.kind !== "none") eases[ch] = e;
+              if (e) eases[ch] = e;
             }
             if (Object.keys(eases).length) k.eases = eases as typeof k.eases;
             else delete k.eases;

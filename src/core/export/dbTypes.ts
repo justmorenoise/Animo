@@ -139,10 +139,22 @@ export interface DbAnimation {
   slot?: DbSlotTimeline[];
 }
 
+/** The stage, as DragonBones Pro writes it: a rectangle in the armature's
+ *  space, and the background as 0xRRGGBB. The runtime reads it and draws
+ *  nothing with it; it is what lets a file opened again keep its stage. */
+export interface DbCanvas {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color?: number;
+}
+
 export interface DbArmature {
   name: string;
   type?: string;
   frameRate?: number;
+  canvas?: DbCanvas;
   bone: DbBone[];
   slot: DbSlot[];
   skin: DbSkin[];

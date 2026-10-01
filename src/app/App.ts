@@ -908,6 +908,27 @@ export class App {
     ];
   }
 
+  /** File ▸ Open DragonBones…: a zip, or the skeleton, its atlases and pages picked together. */
+  private async pickDragonBones(): Promise<void> {
+    if (!(await this.project.mayDiscard())) return;
+    const input = h("input", { type: "file", multiple: true, accept: ".zip,.json,.png,.dbbin" });
+    input.style.display = "none";
+    document.body.appendChild(input);
+    on(input, "change", () => {
+      const files = Array.from(input.files ?? []);
+      input.remove();
+      if (files.length) void this.openDragonBones(files, true);
+    });
+    input.click();
+  }
+
+  /** What the file had that Animo cannot hold is said once, in one list. */
+  async openDragonBones(files: File[], asked = false): Promise<void> {
+    const notes = await this.project.openDragonBones(files, asked);
+    if (!notes?.length) return;
+    await alertDialog({ title: "Opened, with changes", message: notes.map((n) => `• ${n}`).join("\n"), width: 560 });
+  }
+
   /** File ▸ Import PSD… — the same path as dropping one on the Library. */
   private pickPsd(): void {
     const input = h("input", { type: "file", accept: ".psd,image/vnd.adobe.photoshop" });
@@ -1034,6 +1055,7 @@ export class App {
         items: () => [
           it("file.new"),
           it("file.open"),
+          it("file.openDragonBones"),
           ...this.recentItems(),
           "-",
           it("file.save"),
@@ -1235,6 +1257,7 @@ export class App {
 
     reg("file.new", () => void this.project.newProject());
     reg("file.open", () => void this.project.open());
+    reg("file.openDragonBones", () => void this.pickDragonBones());
     reg("file.save", () => void this.project.save(), () => s.history.isDirty);
     reg("file.saveAs", () => void this.project.saveAs());
     reg("file.importImages", () => this.shell.showPanel("library"));

@@ -398,6 +398,12 @@ function exportArmature(
     animation,
   };
   if (ik.length) armature.ik = ik;
+  if (sym.id === project.rootSymbolId) {
+    const { width, height, background } = project.stage;
+    armature.canvas = { x: 0, y: 0, width, height };
+    const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(background.trim())?.[1];
+    if (hex) armature.canvas.color = parseInt(hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex, 16);
+  }
 
   // Child armatures have their own clock; without a default action a nested
   // symbol would sit frozen on its first frame.

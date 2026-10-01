@@ -155,7 +155,7 @@ export function openEaseDialog(store: Store, targets: EaseTarget[]): void {
       tween = spec ?? { kind: "linear" };
     } else {
       const next = { ...eases };
-      if (spec && spec.kind !== "none") next[scope] = spec;
+      if (spec) next[scope] = spec;
       else delete next[scope];
       eases = next;
     }
@@ -226,7 +226,11 @@ export function openEaseDialog(store: Store, targets: EaseTarget[]): void {
     clear(choiceList);
     const current = choiceOf(specInScope());
     if (scope === "all") choiceList.appendChild(row("No tween", current === "none", () => choose("none")));
-    else choiceList.appendChild(row("Same as All", current === "default", () => choose("default")));
+    else {
+      choiceList.appendChild(row("Same as All", current === "default", () => choose("default")));
+      // This channel holds while the others tween.
+      choiceList.appendChild(row("No tween", current === "none", () => choose("none")));
+    }
     choiceList.appendChild(row("Linear", current === "linear", () => choose("linear")));
     choiceList.appendChild(row("Classic", current === "classic", () => choose("classic")));
     for (const f of EASE_FAMILIES) {
@@ -269,6 +273,8 @@ export function openEaseDialog(store: Store, targets: EaseTarget[]): void {
         "⌥-click for a sharp corner · ⌘-click to delete · ⌥-drag a handle to move it on its own";
     } else if (tween.kind === "none") {
       hint.textContent = "No tween: the frames keep the first keyframe's values until the next keyframe.";
+    } else if (scope !== "all" && eases[scope]?.kind === "none") {
+      hint.textContent = "No tween for this property: it keeps the first keyframe's value until the next keyframe while the others tween.";
     } else if (scope !== "all" && !eases[scope]) {
       hint.textContent = "Uses the ease set for All properties.";
     } else {

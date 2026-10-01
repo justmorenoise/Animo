@@ -357,14 +357,80 @@ export function tweenToJson(spec: TweenSpec, frameCount = 1): TweenJson {
 
 export function tweenFromJson(raw: TweenJson): TweenSpec {
   if (raw.curve && raw.curve.length >= 4 && raw.curve.length % 6 === 4) {
-    return { kind: "curve", curve: [...raw.curve] };
+    return { kind: "curve", curve: curveFromJson(raw.curve) };
   }
   if (raw.tweenEasing === undefined || raw.tweenEasing === null) return TWEEN_NONE;
   if (raw.tweenEasing === 0) return TWEEN_LINEAR;
   return { kind: "ease", value: raw.tweenEasing };
 }
 
+/**
+ * A frame's ease as the runtime reads it out of a file
+ * (`_parseTweenFrame`), over the `span` frames it governs, as a spec a
+ * document keeps and the editor shows exactly as the runtime plays it.
+ * - `tweenEasing` absent, and -2 (the parser's own "absent"), is a hold.
+ * - A scalar outside what a document keeps (`[-1, 2]`) is a curve through it.
+ * - A multi-segment curve this exporter did not pad is a curve through what
+ *   the runtime plays: it evaluates the first and last segments its own way
+ *   (`sampleRuntimeCurve`), which a padded curve never reaches.
+ */
+export function tweenFromFile(raw: TweenJson, span: number): TweenSpec {
+  if (span <= 0) return TWEEN_NONE;
+  const curve = raw.curve;
+  if (curve && curve.length >= 4 && curve.length % 6 === 4) {
+    if (curve.length === 4 || isPadded(curve)) return { kind: "curve", curve: curveFromJson(curve) };
+    const samples = sampleRuntimeCurve(curve, span);
+    return throughCurve((s) => easeCurveSampled(s, samples), span) ?? { kind: "curve", curve: [...curve] };
+  }
+  const e = raw.tweenEasing;
+  if (e === undefined || e === null || e === -2) return TWEEN_NONE;
+  if (e === 0) return TWEEN_LINEAR;
+  if (e >= -1 && e <= 2) return { kind: "ease", value: e };
+  return throughCurve((s) => easeScalar(s, e), span) ?? { kind: "ease", value: Math.min(2, Math.max(-1, e)) };
+}
+
+function throughCurve(f: (s: number) => number, span: number): TweenSpec | null {
+  const v = throughFrames(f, span);
+  return v.some((x) => Math.abs(x) > CURVE_Y_LIMIT) ? null : { kind: "curve", curve: polylineCurve(v) };
+}
+
+const isPadded = (c: readonly number[]) =>
+  c.length > 4 + 12 && c.slice(0, 6).every((v) => v === 0) && c.slice(-6).every((v) => v === 1);
+
+/** `curveToJson` read back: the zero-width segments it pads a multi-segment
+ *  curve with come off, or every round trip through a file would add more. */
+export function curveFromJson(curve: readonly number[]): number[] {
+  let out = [...curve];
+  while (isPadded(out)) out = out.slice(6, -6);
+  return out;
+}
+
 /* ── Cutting an interval ──────────────────────────────────────────────────*/
+
+/**
+ * The ease of the part `from..to` (frames, inside `0..span`) of an interval
+ * eased by `spec`, so that tweening just that part shows the same motion:
+ * what reading a file needs when one timeline has a key inside another's
+ * interval. A hold stays a hold and linear stays linear; anything else is a
+ * curve through the original at every whole frame (`throughFrames`). Null
+ * when that curve needs values past what the file can hold, or when the part
+ * moves and comes back to where it started, which no ease between two equal
+ * values can show.
+ */
+export function subTween(spec: TweenSpec, span: number, from: number, to: number): TweenSpec | null {
+  if (spec.kind === "none" || spec.kind === "linear") return spec;
+  if (from <= 0 && to >= span) return spec;
+  const E = (frame: number) => applyTween(spec, frame / span, span);
+  const a = E(from), b = E(to);
+  const m = to - from;
+  if (Math.abs(b - a) < 1e-9) {
+    for (let k = 1; k < m; k++) if (Math.abs(E(from + k) - a) > 1e-4) return null;
+    return { kind: "linear" };
+  }
+  const v = throughFrames((s) => (E(from + s * m) - a) / (b - a), m);
+  if (v.some((x) => Math.abs(x) > CURVE_Y_LIMIT)) return null;
+  return { kind: "curve", curve: polylineCurve(v) };
+}
 
 /**
  * The eases of the two halves of an interval of `span` frames cut `at`
@@ -492,7 +558,9 @@ export const EASE_PRESETS: ReadonlyArray<{ label: string; spec: TweenSpec }> = [
 
 export type TweenChannel = "position" | "rotation" | "scale" | "color";
 export const TWEEN_CHANNELS: readonly TweenChannel[] = ["position", "rotation", "scale", "color"];
-export type ChannelEases = Partial<Record<TweenChannel, EaseSpec>>;
+/** Per-property overrides. A hold on one channel holds it while the others
+ *  tween: DragonBones gives every timeline its own ease, holds included. */
+export type ChannelEases = Partial<Record<TweenChannel, TweenSpec>>;
 
 /** The ease a channel follows over the interval leaving a key. A hold holds
  *  every channel; otherwise an override wins over the key's own ease. */

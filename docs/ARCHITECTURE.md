@@ -1132,6 +1132,71 @@ rules live, so `tests/psdImport.test.ts` can exercise all of them).
 - `ag-psd`, not `psd.js`: psd.js is CoffeeScript with Node-only deps (`fs`, `pngjs`,
   `iconv-lite`, a CoffeeScript compiler at runtime) and no browser entry.
 
+## DragonBones import
+
+File ▸ Open DragonBones… opens a DragonBones 5.x project — a zip, or the `_ske.json`, its
+`_tex.json` and pages picked together — as a new, unsaved document, as File ▸ New makes one. The
+inverse of the export, in three layers like the PSD import:
+
+`io/import/dbReader.ts` (sorts the files by content — a skeleton has `armature`, an atlas
+`SubTexture`, Animo's `_ext.json` `format: "animo-extensions"` — and cuts every SubTexture back to
+its untrimmed image: `subTextureCut`, pure) → `ProjectService.openDragonBones` (registers the
+images, replaces the project) → `core/doc/dbImport.ts` and `core/doc/dbTimeline.ts` (pure: JSON
+and image refs → a `Project` and a list of what was dropped, the only place the mapping lives).
+The file is built once with stand-in asset ids before the open document's assets are cleared, so
+a refused file (4.x, binary, no skeleton) leaves the work as it was.
+
+- **The round trip is the test.** `tests/dbImport.test.ts` exports `stickman` and `frog`, opens
+  the export and compares, at every frame of every animation, what each slot draws: the matrix,
+  the display, the colour. Both come back identical with no warnings, masks and motion blur
+  included (`_ext.json`). The rules for files Animo did not write are in
+  `tests/dbImportRules.test.ts`.
+- **Armature → symbol.** The scene is the armature no other one shows. A child plays its first
+  animation in Animo, so the one its `defaultActions` starts goes first.
+- **Bone and slot.** DragonBones keeps them apart; Animo writes an image node as a bone and a
+  slot of the same name with the display at the bone's origin. That shape is read back as ONE
+  node; any other slot is a node under its bone, its bind pose the display's `transform`. A
+  slot's other displays keep their places through their pivots (one transform per node);
+  turned or scaled differently from the first, they cannot, and say so.
+- **The setup display is display 0.** A slot whose `displayIndex` is not 0 has its display list
+  reordered and its timelines remapped; one hidden in the setup pose (`-1`) gets a blank key in
+  every animation that does not show it.
+- **Draw order.** Animo draws the layer list depth first, so a bone's subtree is drawn together;
+  DragonBones orders slots freely. Siblings are sorted by the front-most slot under them, which
+  keeps the file's order whenever it follows the bones; the slots it cannot keep are named
+  (`longestDecreasing`). A merged node draws in front of its children, so a slot is merged only
+  when it is in front of every slot under its bone.
+- **Timelines** (`dbTimeline.ts`). Each DragonBones channel has its own frames and eases; an
+  Animo key holds them all. Keys go at the union of every channel's frames, each channel is
+  sampled there, and its ease is cut where another channel has a key (`subTween` in
+  `core/math/easing.ts`, built on `throughFrames`), so the motion between keys is the file's
+  too. A cut no curve can hold gets a key every frame. Rotation is unwrapped exactly as
+  `_parseBoneRotateFrame` does (short way, unless `clockwise`); the 5.0 single `frame` list is
+  read as three channels.
+- **Read as the runtime reads it, not as Animo writes it.** The round trip only proves Animo
+  against Animo; `tests/dbImportRuntime.test.ts` covers what only other files hold. Frames are
+  placed as `_parseTimeline` places them (`placed`): one per tick, so a frame of no length in the
+  middle still takes one; the last lasts to the end whatever it says; one frame alone never
+  tweens. Eases go through `tweenFromFile`: `tweenEasing` -2 is the parser's own "absent", a hold;
+  a scalar outside the document's `[-1, 2]` becomes a curve through it (or saving would clamp
+  it); a multi-segment curve Animo did not pad is rebuilt from `sampleRuntimeCurve`, because the
+  runtime evaluates its first and last segments its own way. A 5.0 slot `frame` list makes a
+  colour timeline whether its frames name a colour or not.
+- **A hold on one channel.** DragonBones can hold one timeline while another tweens over the same
+  frames; `Keyframe.eases` takes `{ kind: "none" }` per channel for it (schema unchanged; the
+  stage and the exporter already went through `easeOf`).
+- **The end of an animation.** Animo shows frames 0 to duration − 1. A channel still tweening
+  there (toward a frame AT the end, or back to the first in a loop) gets a key on the last
+  frame, at the value on the way; the frame at the end itself is never keyed.
+- **Stage.** The export now writes the scene armature's `canvas` (stage size and colour, a 5.5
+  field the runtime reads and ignores); the import takes it, or frames the `aabb` with a margin,
+  and moves the scene's top-level nodes by the canvas' corner.
+- **Dropped, and said:** meshes, bounding boxes, paths, skins but the first, deform, z-order and
+  IK timelines, events, sounds, actions, animation `scale`, inheritTranslation/Reflection, blend
+  modes the runtime does not draw. Rotated atlas regions are turned back with the Starling
+  convention (stored 90° clockwise), and the import says which, since no Animo export has any to
+  test against.
+
 ## The library panel
 
 Sorting is a VIEW concern: `LibraryPanel.renderList` sorts by name (ascending by default,
