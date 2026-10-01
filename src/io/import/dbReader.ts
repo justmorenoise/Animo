@@ -1,6 +1,6 @@
 import { strFromU8 } from "fflate";
 import { unzipFiles } from "@/io/zip";
-import { asArr, asObj, num, str } from "@/core/doc/dbTimeline";
+import { asArr, asObj, bool, num, str } from "@/core/doc/dbTimeline";
 import { DbImportError } from "@/core/doc/dbImport";
 
 /**
@@ -44,7 +44,7 @@ export interface Cut {
  */
 export function subTextureCut(st: Record<string, unknown>, scale: number): Cut {
   const x = num(st.x, 0), y = num(st.y, 0), w = num(st.width, 0), h = num(st.height, 0);
-  const rotated = st.rotated === true;
+  const rotated = bool(st.rotated, false);
   const shownW = rotated ? h : w, shownH = rotated ? w : h;
   const fx = num(st.frameX, 0), fy = num(st.frameY, 0);
   const k = scale > 0 ? 1 / scale : 1;
@@ -120,7 +120,7 @@ export async function readDbFiles(files: File[], onProgress: (fraction: number) 
       for (const raw of asArr(atlas.json.SubTexture)) {
         const st = asObj(raw);
         if (!st || !str(st.name)) continue;
-        if (st.rotated === true) rotated.push(str(st.name));
+        if (bool(st.rotated, false)) rotated.push(str(st.name));
         const cut = subTextureCut(st, scale);
         const canvas = new OffscreenCanvas(cut.width, cut.height);
         const ctx = canvas.getContext("2d")!;

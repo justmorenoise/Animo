@@ -33,7 +33,7 @@ import {
 import { createAnimation, createImageItem, createLayer, createNode, type NewProjectDefaults } from "./defaults";
 import { normalizeMasks } from "./layerTree";
 import {
-  allFrameChannels, anglesOf, asArr, asObj, colorChannel, colorOf, displayChannel, keysFor, type NodeChannels, num,
+  allFrameChannels, anglesOf, asArr, asObj, bool, colorChannel, colorOf, displayChannel, keysFor, type NodeChannels, num,
   type Raw, rotateChannel, scaleChannel, str, translateChannel,
 } from "./dbTimeline";
 
@@ -263,7 +263,7 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     if (bones.has(str(b.name))) { warn(`"${armName}": two bones are called "${str(b.name)}"; the second is left out.`); continue; }
     const type = typeof b.type === "number" ? (b.type === 0 ? "bone" : "surface") : str(b.type, "bone");
     if (type !== "bone") { warn(`"${armName}": the surface "${str(b.name)}" is not supported and is left out.`); continue; }
-    if (b.inheritTranslation === false || b.inheritReflection === false) warn(`"${armName}": bone "${str(b.name)}" does not inherit its parent's translation or reflection; Animo bones always do.`);
+    if (!bool(b.inheritTranslation, true) || !bool(b.inheritReflection, true)) warn(`"${armName}": bone "${str(b.name)}" does not inherit its parent's translation or reflection; Animo bones always do.`);
     bones.set(str(b.name), b);
   }
   // A parent that is, through its own parents, the bone itself would loop: the bone is a root.
@@ -341,8 +341,8 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     node.bind = transformOf(b.transform);
     if (kind === "bone") node.boneLength = length;
     else delete node.boneLength;
-    if (b.inheritRotation === false) node.inheritRotation = false;
-    if (b.inheritScale === false) node.inheritScale = false;
+    if (!bool(b.inheritRotation, true)) node.inheritRotation = false;
+    if (!bool(b.inheritScale, true)) node.inheritScale = false;
     boneNodes.set(bname, node);
   }
   for (const [bname, node] of boneNodes) {
@@ -353,10 +353,13 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
   const slotNodes = new Map<string, { node: Node; perm: (i: number) => number; hidden: boolean }>();
   for (const s of slots) {
     const m = merged.get(s.bone) === s;
-    const node = m ? boneNodes.get(s.bone)! : createNode(setupDisplay(s)?.kind ?? "empty", nodeName(s.name));
+    // A slot named after its bone keeps that name: the export writes it back
+    // onto that bone, as DragonBones Pro does (`slotsOnTheirBone`).
+    const sameAsBone = !m && s.bone !== "" && s.name === s.bone && boneNodes.get(s.bone)!.name === s.name;
+    const node = m ? boneNodes.get(s.bone)! : createNode(setupDisplay(s)?.kind ?? "empty", sameAsBone ? s.name : nodeName(s.name));
     if (!m) {
       node.parentId = s.bone ? boneNodes.get(s.bone)!.id : null;
-      if (node.name !== s.name) warn(`"${armName}": slot "${s.name}" shares its name with a bone; it is "${node.name}" in Animo.`);
+      if (node.name !== s.name) warn(`"${armName}": slot "${s.name}" shares its name with another node; it is "${node.name}" in Animo.`);
     }
     slotNodes.set(s.name, { node, ...displaysInto(node, s, !m, warn, armName) });
     if (asObj(s.raw.color)) node.color = colorOf(s.raw.color);
@@ -372,7 +375,7 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     if (!bone || !target) { warn(`"${armName}": IK "${str(k.name)}" names a bone the armature does not have; left out.`); return []; }
     return [{
       id: newIkId(), name: str(k.name) || `${bone.name}_ik`, boneId: bone.id, targetId: target.id,
-      chain: num(k.chain, 0) > 0 ? 1 : 0, bendPositive: k.bendPositive !== false, weight: num(k.weight, 1),
+      chain: num(k.chain, 0) > 0 ? 1 : 0, bendPositive: bool(k.bendPositive, true), weight: num(k.weight, 1),
     }];
   });
 

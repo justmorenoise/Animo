@@ -169,6 +169,34 @@ export function localAt(
  * in the UI, and DragonBones draws later `slot[]` entries in front, so the
  * bottom layer is painted first and exported first.
  */
+/**
+ * A child's world matrix, honouring the bone's inheritance flags as
+ * `Bone._updateGlobalTransformMatrix` does (no flips, y down): all of the
+ * parent by default; without `inheritRotation` the parent's rotation is
+ * taken back out of the child's; without `inheritScale` only the parent's
+ * position (and rotation, unless that is off too) carries over, the child
+ * keeping its own scale. DragonBones Pro writes these flags often; Animo
+ * reads them from an imported file and writes them back.
+ */
+export function composeChild(out: Matrix2D, parent: Matrix2D, local: Transform, node: Pick<Node, "inheritRotation" | "inheritScale">): Matrix2D {
+  if (node.inheritRotation !== false && node.inheritScale !== false) return mul(out, parent, toMatrix(mat(), local));
+  // The parent's global rotation, as the runtime decomposes it (modulo a turn).
+  const parentRotation = (Math.atan2(parent.b, parent.a) * 180) / Math.PI;
+  if (node.inheritScale !== false) {
+    const t = { ...local, skewX: local.skewX - parentRotation, skewY: local.skewY - parentRotation };
+    return mul(out, parent, toMatrix(mat(), t));
+  }
+  const x = parent.a * local.x + parent.c * local.y + parent.tx;
+  const y = parent.b * local.x + parent.d * local.y + parent.ty;
+  let add = 0, skew = 0;
+  if (node.inheritRotation !== false) {
+    add = parentRotation;
+    // A mirrored parent turns the child the other way, and flips its skew.
+    if (determinant(parent) < 0) { add -= 2 * local.skewY; skew = 180; }
+  }
+  return toMatrix(out, { ...local, x, y, skewY: local.skewY + add, skewX: local.skewX + add + skew });
+}
+
 export function evaluateSymbol(
   symbol: SymbolItem,
   animation: Animation | null,
@@ -224,7 +252,7 @@ export function evaluateSymbol(
     const parent = parentId ? byNode.get(parentId) : undefined;
     if (parent) {
       resolve(parent);
-      mul(entry.world, parent.world, local);
+      composeChild(entry.world, parent.world, entry.local, entry.node);
     } else {
       entry.world = local;
     }

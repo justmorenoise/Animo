@@ -27,7 +27,8 @@ const nodeNamed = (sym: SymbolItem, name: string) => Object.values(sym.nodes).fi
 /** The matrix a node's artwork is drawn with, at a frame of an animation (null: the setup pose). */
 function drawMatrix(sym: SymbolItem, node: string, anim: string | null, frame = 0): Matrix2D | null {
   const pose = evaluateSymbol(sym, anim ? sym.animations.find((a) => a.name === anim)! : null, frame, anim ? "animate" : "setup");
-  const e = pose.entries.find((x) => x.node.name === node)!;
+  // A slot named after its bone shares the name: the artwork's entry is the one with a display.
+  const e = pose.entries.find((x) => x.node.name === node && (x.node.kind === "image" || x.node.kind === "symbol"))!;
   if (!e.visible || !e.display) return null;
   return mul(mat(), e.world, { a: 1, b: 0, c: 0, d: 1, tx: -e.display.pivot.x, ty: -e.display.pivot.y });
 }
@@ -50,11 +51,16 @@ describe("bones and slots", () => {
     expect(nodeNamed(sym, "root").kind).toBe("group");
     const slot = Object.values(sym.nodes).find((n) => n.kind === "image")!;
     expect(slot.parentId).toBe(bone.id);
-    // The slot node takes the bone's name with a suffix: the bone keeps its own.
-    expect(slot.name).toBe("upper_2");
-    expect(warnings.join(" ")).toMatch(/slot "upper" shares its name with a bone/);
+    // Both keep the file's name, as DragonBones Pro names a slot after its bone.
+    expect(slot.name).toBe("upper");
+    expect(warnings).toEqual([]);
     // Bone: translate (10, 20), turned 90°. Display: 50 along the bone, then −pivot (25, 20).
-    close(drawMatrix(sym, "upper_2", null), { a: 0, b: 1, c: -1, d: 0, tx: 10 + 20, ty: 20 + 50 - 25 });
+    close(drawMatrix(sym, "upper", null), { a: 0, b: 1, c: -1, d: 0, tx: 10 + 20, ty: 20 + 50 - 25 });
+    // And it goes out again as it came: the slot on its bone, its place the display's transform.
+    const arm = exportSkeleton(project).skeleton.armature[0]!;
+    expect(arm.bone.map((b) => b.name)).toEqual(["root", "upper"]);
+    expect(arm.slot).toEqual([{ name: "upper", parent: "upper" }]);
+    expect(arm.skin[0]!.slot[0]!.display).toEqual([{ name: "arm", pivot: { x: 0.25, y: 0.5 }, transform: { x: 50 } }]);
   });
 
   it("a slot alone on its bone, called the same and at its origin, is that bone's node, as Animo writes them", () => {

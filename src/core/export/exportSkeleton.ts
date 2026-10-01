@@ -253,9 +253,10 @@ function exportArmature(
   // Bone and slot names are the runtime's only handle on a node, so they
   // have to be unique within the armature. Rename collisions rather than
   // emitting a file the runtime would silently mis-wire.
-  const names = uniqueNames(sym, diags);
-
   const skipped = excludedNodes(sym);
+  const onBone = slotsOnTheirBone(sym, skipped);
+  const names = uniqueNames(sym, diags, onBone);
+
   reportExcluded(sym, skipped, diags);
 
   // A skipped node that still has a KEPT descendant keeps its bone — never
@@ -273,7 +274,7 @@ function exportArmature(
 
   const bones: DbBone[] = [];
   for (const node of nodesInHierarchyOrder(sym)) {
-    if (dropped(node.id)) continue;
+    if (dropped(node.id) || onBone.has(node.id)) continue;
     const bone: DbBone = { name: names.get(node.id)! };
     const parentName = node.parentId ? names.get(node.parentId) : undefined;
     if (parentName) bone.parent = parentName;
@@ -300,7 +301,8 @@ function exportArmature(
 
     const exported = exportedDisplays(sym, node);
 
-    const slot: DbSlot = { name, parent: name };
+    // A slot on its bone hangs from that bone; any other from the bone of its own name.
+    const slot: DbSlot = { name, parent: onBone.has(node.id) ? names.get(node.parentId!)! : name };
     if (node.blendMode && node.blendMode !== "normal") {
       // `PixiSlot._updateBlendMode` is guarded by `instanceof PIXI.Sprite`, so
       // a child-armature display (a Container) never receives one.
@@ -335,7 +337,7 @@ function exportArmature(
     const display: DbDisplay[] = [];
     const placed = new Map<number, number>();
     exported.refs.forEach((ref, i) => {
-      const built = buildDisplay(project, node, ref, diags, usedImages);
+      const built = buildDisplay(project, node, ref, diags, usedImages, onBone.has(node.id));
       if (!built) return;
       placed.set(i, display.length);
       display.push(built);
@@ -374,7 +376,7 @@ function exportArmature(
     for (const node of Object.values(sym.nodes)) {
       const track = anim.tracks[node.id];
       if (!track || dropped(node.id)) continue;
-      const bt = buildBoneTimeline(track, { ...node, name: names.get(node.id)! }, anim.duration);
+      const bt = onBone.has(node.id) ? null : buildBoneTimeline(track, { ...node, name: names.get(node.id)! }, anim.duration);
       if (bt) boneTimelines.push(bt);
       if (producesSlot(node) && !skipped.has(node.id)) {
         const st = buildSlotTimeline(track, names.get(node.id)!, anim.duration, displayMaps.get(node.id));
@@ -442,9 +444,25 @@ function exportedDisplays(
 
 function buildDisplay(
   project: Project, node: Node, ref: DisplayRef,
-  diags: ExportDiagnostic[], usedImages: Set<ItemId>,
+  diags: ExportDiagnostic[], usedImages: Set<ItemId>, onBone = false,
 ): DbDisplay | null {
   const item = project.items[ref.itemId];
+
+  // A slot on its bone (`slotsOnTheirBone`): the node's own place is the display's transform.
+  if (onBone && (isImage(item) || isSymbol(item))) {
+    const b = node.bind;
+    let t = { ...b };
+    if (isSymbol(item)) {
+      const rx = (b.skewX * Math.PI) / 180, ry = (b.skewY * Math.PI) / 180;
+      t = { ...b,
+        x: b.x - (Math.cos(ry) * b.scaleX * ref.pivot.x - Math.sin(rx) * b.scaleY * ref.pivot.y),
+        y: b.y - (Math.sin(ry) * b.scaleX * ref.pivot.x + Math.cos(rx) * b.scaleY * ref.pivot.y) };
+    }
+    const display = buildDisplay(project, node, isSymbol(item) ? { ...ref, pivot: { x: 0, y: 0 } } : ref, diags, usedImages);
+    const transform = transformToDb({ ...node, bind: t });
+    if (display && transform) display.transform = transform;
+    return display;
+  }
 
   if (isImage(item)) {
     usedImages.add(item.id);
@@ -526,15 +544,17 @@ function nodesInHierarchyOrder(sym: SymbolItem): Node[] {
 }
 
 /** DragonBones identifies bones and slots by name, so names must be unique. */
-function uniqueNames(sym: SymbolItem, diags: ExportDiagnostic[]): Map<NodeId, string> {
+function uniqueNames(sym: SymbolItem, diags: ExportDiagnostic[], onBone: Set<NodeId> = new Set()): Map<NodeId, string> {
   const map = new Map<NodeId, string>();
   const taken = new Set<string>();
   for (const layer of sym.layers) {
     const node = sym.nodes[layer.nodeId];
-    if (!node) continue;
+    if (!node || onBone.has(node.id)) continue;
     assign(node);
   }
-  for (const node of Object.values(sym.nodes)) if (!map.has(node.id)) assign(node);
+  for (const node of Object.values(sym.nodes)) if (!map.has(node.id) && !onBone.has(node.id)) assign(node);
+  // A slot on its bone shares the bone's name: slots and bones are named apart.
+  for (const id of onBone) map.set(id, map.get(sym.nodes[id]!.parentId!)!);
   return map;
 
   function assign(node: Node): void {
@@ -550,6 +570,35 @@ function uniqueNames(sym: SymbolItem, diags: ExportDiagnostic[]): Map<NodeId, st
     taken.add(name);
     map.set(node.id, name);
   }
+}
+
+/**
+ * Nodes written as DragonBones Pro writes a slot: hung from the bone of the
+ * same name, their own place the display's `transform`, with no bone of
+ * their own. That is what a DragonBones file opened in Animo holds — a slot
+ * named after its bone, its display moved off the bone — and writing it back
+ * so keeps every slot and bone name a game asks for. Only where nothing is
+ * lost: an artwork node whose parent is a bone or group of its name, with no
+ * children, no IK and no key that moves it.
+ */
+function slotsOnTheirBone(sym: SymbolItem, skipped: Set<NodeId>): Set<NodeId> {
+  const out = new Set<NodeId>();
+  const parents = new Set(Object.values(sym.nodes).map((n) => n.parentId));
+  const inIk = new Set(sym.ik.flatMap((k) => [k.boneId, k.targetId]));
+  for (const node of Object.values(sym.nodes)) {
+    const parent = node.parentId ? sym.nodes[node.parentId] : undefined;
+    if (!parent || !producesSlot(node) || skipped.has(node.id) || skipped.has(parent.id)) continue;
+    if (parent.kind !== "bone" && parent.kind !== "group") continue;
+    if (node.name.trim() !== parent.name.trim() || parents.has(node.id) || inIk.has(node.id)) continue;
+    const still = sym.animations.every((a) => (a.tracks[node.id]?.keys ?? []).every((k) => sameTransform(k.transform, node.bind)));
+    if (still) out.add(node.id);
+  }
+  return out;
+}
+
+function sameTransform(a: Node["bind"], b: Node["bind"]): boolean {
+  return Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4 && Math.abs(a.skewX - b.skewX) < 1e-4
+    && Math.abs(a.skewY - b.skewY) < 1e-4 && Math.abs(a.scaleX - b.scaleX) < 1e-4 && Math.abs(a.scaleY - b.scaleY) < 1e-4;
 }
 
 /** Bind pose -> `transform`, omitting every default so the JSON stays small. */

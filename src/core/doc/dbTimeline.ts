@@ -27,8 +27,24 @@ export type Raw = Record<string, unknown>;
 
 export const asObj = (v: unknown): Raw | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Raw : null);
 export const asArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-export const num = (v: unknown, fallback: number): number => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
-export const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
+/** A number as `DataParser._getNumber` reads one: absent or null is the
+ *  fallback, anything else is `+v`, and what is not a number is 0 — so
+ *  `"1.5"`, which DragonBones Pro writes now and then, is 1.5. */
+export const num = (v: unknown, fallback: number): number => {
+  if (v === undefined || v === null || v === "NaN") return fallback;
+  const n = +(v as number);
+  return Number.isFinite(n) ? n : 0;
+};
+export const str = (v: unknown, fallback = ""): string => (v === undefined ? fallback : typeof v === "string" ? v : String(v));
+/** A flag as `DataParser._getBoolean` reads one: `"false"`, `"0"`, `""`,
+ *  `"null"`, `"undefined"` and `"NaN"` are false, as written by tools that
+ *  quote every value. */
+export const bool = (v: unknown, fallback: boolean): boolean => {
+  if (v === undefined) return fallback;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "string") return !["0", "NaN", "", "false", "null", "undefined"].includes(v);
+  return !!v;
+};
 
 /** One frame of a channel: its value from `at`, eased by `tween` to the next. */
 export interface ChannelFrame<V> { at: number; value: V; tween: TweenSpec }

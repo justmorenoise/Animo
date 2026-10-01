@@ -1182,6 +1182,19 @@ a refused file (4.x, binary, no skeleton) leaves the work as it was.
   it); a multi-segment curve Animo did not pad is rebuilt from `sampleRuntimeCurve`, because the
   runtime evaluates its first and last segments its own way. A 5.0 slot `frame` list makes a
   colour timeline whether its frames name a colour or not.
+- **Values as `DataParser` reads them**: `num` takes `"1.5"` as 1.5, `bool` takes `"false"`,
+  `"0"` and `""` as false. DragonBones Pro quotes some values; reading `"false"` as true turned
+  every knee of an official demo inside out.
+- **A slot named after its bone** — DragonBones Pro's habit, its display moved or turned off the
+  bone — keeps that name: an artwork node under a bone or group of its own name, with no
+  children, no IK and no key that moves it, is exported as a slot on that bone with its place as
+  the display's `transform` (`slotsOnTheirBone`), so bone and slot names come back as they were.
+- **Checked against the runtime.** Eleven official DragonBones demos (mechas with IK and several
+  armatures, weapons, effects) were opened and compared with the runtime itself, frame by frame,
+  slot by slot (draw matrix, display shown): ten agree to the pixel. Two things that check found
+  are general: the flags above, and the stage ignoring `inheritRotation`/`inheritScale`
+  (`composeChild` in `pose.ts` now composes as `Bone._updateGlobalTransformMatrix` does). Left:
+  about 1.5 px on one rig with two IK constraints on one leg.
 - **A hold on one channel.** DragonBones can hold one timeline while another tweens over the same
   frames; `Keyframe.eases` takes `{ kind: "none" }` per channel for it (schema unchanged; the
   stage and the exporter already went through `easeOf`).

@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { type AssetId, reseed } from "@/core/doc/ids";
 import { buildDbImport, type DbImageRef, longestDecreasing } from "@/core/doc/dbImport";
-import { channelFrames, placed, translateChannel } from "@/core/doc/dbTimeline";
+import { bool, channelFrames, num, placed, translateChannel } from "@/core/doc/dbTimeline";
 import { validateProject } from "@/core/doc/schema";
-import { evaluateSymbol } from "@/core/doc/pose";
+import { composeChild, evaluateSymbol } from "@/core/doc/pose";
+import { mat, type Matrix2D } from "@/core/math/Matrix2D";
+import { tf, toMatrix } from "@/core/math/Transform";
 import type { Project, SymbolItem } from "@/core/doc/types";
 import {
   applyTween, curveFromJson, curveToJson, easeCurveSampled, easeScalar, sampleRuntimeCurve, subTween, tweenFromFile,
@@ -173,12 +175,12 @@ describe("whole files read as the runtime reads them", () => {
         }],
       },
     });
-    expect(warnings).toEqual([expect.stringMatching(/slot "arm" shares its name with a bone/)]);
+    expect(warnings).toEqual([]);
     const s = sym(project);
     expect(Object.values(s.nodes).find((n) => n.name === "arm")!.kind).toBe("group");
     const order = evaluateSymbol(s, null, 0).entries.filter((e) => e.node.kind === "image").map((e) => e.node.name);
     // Back to front.
-    expect(order).toEqual(["arm_2", "hand"]);
+    expect(order).toEqual(["arm", "hand"]);
   });
 
   it("a slot renamed in Animo keeps its mask link", () => {
@@ -187,9 +189,9 @@ describe("whole files read as the runtime reads them", () => {
       extensions: { format: "animo-extensions", extensions: { ANIMO_masks: { version: 1, masks: [{ armature: "rig", mask: "eye", targets: ["lid"] }] } } },
       skeleton: {
         version: "5.5", armature: [{
-          name: "rig", bone: [{ name: "eye", length: 10 }, { name: "lid" }],
-          slot: [{ name: "lid", parent: "lid" }, { name: "eye", parent: "eye" }],
-          // Placed off its bone's origin, so the slot is a node of its own and needs another name.
+          // The slot "eye" hangs from "head" while a bone is called "eye": it needs another name.
+          name: "rig", bone: [{ name: "eye", length: 10 }, { name: "head" }, { name: "lid" }],
+          slot: [{ name: "lid", parent: "lid" }, { name: "eye", parent: "head" }],
           skin: [{ slot: [{ name: "lid", display: [{ name: "hand" }] }, { name: "eye", display: [{ name: "hand", transform: { x: 5 } }] }] }], animation: [],
         }],
       },
@@ -206,5 +208,53 @@ describe("the export's canvas", () => {
     const p = createProject("x", { width: 300, height: 200, frameRate: 24, background: bg });
     const arm = exportSkeleton(p).skeleton.armature[0]!;
     expect(arm.canvas).toEqual({ x: 0, y: 0, width: 300, height: 200, ...(color === undefined ? {} : { color }) });
+  });
+});
+
+describe("values as DragonBones' parser reads them", () => {
+  it.each([
+    [undefined, true, true], [false, true, false], ["false", true, false], ["0", true, false], ["", true, false],
+    ["null", true, false], ["true", false, true], ["yes", false, true], [1, false, true], [0, true, false],
+  ])("bool(%j, %j) is %j", (v, fallback, expected) => expect(bool(v, fallback)).toBe(expected));
+
+  it.each([
+    [undefined, 7, 7], [null, 7, 7], ["NaN", 7, 7], ["1.5", 0, 1.5], ["abc", 7, 0], [3, 0, 3],
+  ])("num(%j, %j) is %j", (v, fallback, expected) => expect(num(v, fallback)).toBe(expected));
+
+  it("an IK written with bendPositive \"false\" bends the other way", () => {
+    const { project } = buildDbImport({
+      name: "x", images, skeleton: {
+        version: "5.5", armature: [{
+          name: "rig", bone: [{ name: "a", length: 10 }, { name: "b", parent: "a", length: 10 }, { name: "t" }],
+          slot: [], skin: [], animation: [], ik: [{ name: "k", bone: "b", target: "t", chain: "1", bendPositive: "false" }],
+        }],
+      },
+    });
+    expect(sym(project).ik[0]).toMatchObject({ chain: 1, bendPositive: false });
+  });
+});
+
+describe("composeChild: the inheritance flags, as the runtime composes a bone", () => {
+  // Parent: at (100, 50), turned 90°, scaled 2.
+  const parent = toMatrix(mat(), tf(100, 50, 90, 90, 2, 2));
+  const local = tf(10, 0, 30, 30, 1, 1);
+  const deg = (m: Matrix2D) => Math.round((Math.atan2(m.b, m.a) * 180) / Math.PI);
+  const scale = (m: Matrix2D) => +Math.hypot(m.a, m.b).toFixed(6);
+
+  it("by default, everything of the parent", () => {
+    const m = composeChild(mat(), parent, local, {});
+    expect([m.tx, m.ty, deg(m), scale(m)].map((v) => +v.toFixed(6))).toEqual([100, 70, 120, 2]);
+  });
+
+  it("without inheritRotation, the parent's rotation is taken out", () => {
+    const m = composeChild(mat(), parent, local, { inheritRotation: false });
+    expect([m.tx, m.ty, deg(m), scale(m)].map((v) => +v.toFixed(6))).toEqual([100, 70, 30, 2]);
+  });
+
+  it("without inheritScale, the position and rotation carry over, not the scale", () => {
+    const m = composeChild(mat(), parent, local, { inheritScale: false });
+    expect([m.tx, m.ty, deg(m), scale(m)].map((v) => +v.toFixed(6))).toEqual([100, 70, 120, 1]);
+    const still = composeChild(mat(), parent, local, { inheritScale: false, inheritRotation: false });
+    expect([deg(still), scale(still)]).toEqual([30, 1]);
   });
 });
