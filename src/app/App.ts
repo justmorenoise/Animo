@@ -35,7 +35,7 @@ import {
     writeIntoDirectory,
     ZIP_TYPE,
 } from "@/io/project/FileSystem";
-import { ProjectService } from "./ProjectService";
+import { drawOrderMessage, ProjectService } from "./ProjectService";
 import { Toast } from "@/view/widgets/Toast";
 import { Clipboard } from "./Clipboard";
 import {
@@ -71,7 +71,7 @@ import type { AssetId, ItemId, LayerId, NodeId } from "@/core/doc/ids";
 import { cloneTf, type Transform } from "@/core/math/Transform";
 import { applyVec, mat } from "@/core/math/Matrix2D";
 import { moveBy, snapshotOf, topmostSelected } from "@/view/tools/transformOps";
-import { alertDialog, confirmDialog, promptText } from "@/view/widgets/dialogs";
+import { alertDialog, choiceDialog, confirmDialog, promptText } from "@/view/widgets/dialogs";
 import { AtlasTooSmall, oversizeAdvice } from "@/core/atlas/oversize";
 import { busy } from "@/view/widgets/Busy";
 import { phase } from "./busy";
@@ -145,6 +145,14 @@ export class App {
           ok: "Discard", cancel: "Keep Editing", danger: true,
         }),
         busy,
+        chooseDrawOrder: (outOfOrder) => choiceDialog({
+          title: "Draw order",
+          message: drawOrderMessage(outOfOrder),
+          choices: [
+            { label: "Keep the Rig", value: "rig" as const },
+            { label: "Rebuild with Keyframes", value: "keys" as const },
+          ],
+        }),
         onLoaded: (diagnostics) => {
           for (const d of diagnostics) {
             (d.severity === "error" ? console.error : console.warn)(`[Project] ${d.path}: ${d.message}`);

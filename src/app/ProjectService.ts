@@ -14,11 +14,22 @@ import {
 } from "@/io/project/FileSystem";
 import { clearRecents, listRecents, type RecentEntry, rememberRecent, } from "@/io/project/Recents";
 import { Autosaver, type AutosaveRecord, clearAutosave, readAutosave, } from "@/io/project/Autosave";
-import { phase, type RunBusy, runQuietly } from "./busy";
+import { type RunBusy, runQuietly } from "./busy";
 import { readDbFiles } from "@/io/import/dbReader";
-import { buildDbImport, type DbImageRef } from "@/core/doc/dbImport";
+import { buildDbImport, type DbImageRef, type DbImportResult } from "@/core/doc/dbImport";
 import type { AssetId } from "@/core/doc/ids";
 import { perf } from "./perf";
+
+/** The question `chooseDrawOrder` asks, naming the slots (a few per armature). */
+export function drawOrderMessage(outOfOrder: DbImportResult["outOfOrder"]): string {
+  const list = outOfOrder.map(({ armature, slots }) => {
+    const shown = slots.slice(0, 4).map((s) => `"${s}"`).join(", ");
+    return `${shown}${slots.length > 4 ? ` and ${slots.length - 4} more` : ""} in "${armature}"`;
+  }).join("; ");
+  return `Animo draws everything under a bone together, so some slots cannot keep the file's draw order: ${list}.\n\n`
+    + "Rebuild with Keyframes keeps the picture exact: those slots get a key on every frame and no longer follow their bones or IK.\n\n"
+    + "Keep the Rig leaves them on their bones, drawn out of order, for you to fix by hand.";
+}
 
 export interface ProjectServiceEvents {
   onLoaded?(diagnostics: Diagnostic[]): void;
@@ -28,6 +39,12 @@ export interface ProjectServiceEvents {
   confirmDiscard?(): Promise<boolean>;
   /** Runs a slow step under the app's progress indicator. */
   busy?: RunBusy;
+  /**
+   * A DragonBones file whose draw order the rig cannot keep: keep the rig
+   * (`"rig"`) or key those slots (`"keys"`); null cancels the import.
+   * Absent: the rig.
+   */
+  chooseDrawOrder?(outOfOrder: DbImportResult["outOfOrder"]): Promise<"rig" | "keys" | null>;
 }
 
 /**
@@ -237,18 +254,25 @@ export class ProjectService {
       frameRate: general.newDocFps, background: general.newDocBackground,
     };
     try {
-      const { project, warnings, name } = await this.busy(`Opening ${files[0]!.name}`, async (report) => {
-        const read = await readDbFiles(files, phase(report, 0, 0.7));
-        const input = { name: read.name, skeleton: read.skeleton, extensions: read.extensions, defaults };
+      // A build with stand-in images finds what is wrong with the file, and
+      // what to ask, before anything is registered.
+      const { read, outOfOrder } = await this.busy(`Opening ${files[0]!.name}`, async (report) => {
+        const read = await readDbFiles(files, report);
         const stand = new Map<string, DbImageRef>(read.images.map((i) => [i.name, { assetId: i.name as AssetId, width: i.width, height: i.height }]));
-        buildDbImport({ ...input, images: stand });
+        const { outOfOrder } = buildDbImport({ name: read.name, skeleton: read.skeleton, extensions: read.extensions, defaults, images: stand });
+        return { read, outOfOrder };
+      });
+      const drawOrder = outOfOrder.length && this.events.chooseDrawOrder ? await this.events.chooseDrawOrder(outOfOrder) : "rig";
+      if (!drawOrder) return null;
+      const input = { name: read.name, skeleton: read.skeleton, extensions: read.extensions, defaults, drawOrder };
 
+      const { project, warnings, name } = await this.busy(`Opening ${files[0]!.name}`, async (report) => {
         // The open document keeps its images if registering the new ones fails.
         const kept = this.assets.all();
         this.assets.clear();
         try {
           const images = new Map<string, DbImageRef>();
-          const registered = phase(report, 0.7, 1);
+          const registered = report;
           for (const [n, img] of read.images.entries()) {
             const asset = await this.assets.addFromBlob(img.blob, img.name);
             images.set(img.name, { assetId: asset.id, width: img.width, height: img.height });

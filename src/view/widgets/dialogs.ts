@@ -81,6 +81,29 @@ export function alertDialog(opts: AlertOptions): Promise<void> {
   });
 }
 
+export interface ChoiceOptions<T> {
+  title: string;
+  message: string;
+  /** Left to right; the last is the primary button. */
+  choices: Array<{ label: string; value: T }>;
+  cancel?: string;
+}
+
+/** The chosen value, or null when cancelled. Enter answers with the primary button. */
+export function choiceDialog<T>(opts: ChoiceOptions<T>): Promise<T | null> {
+  return new Promise((resolve) => {
+    let answer: T | null = null;
+    const modal = new Modal({ title: opts.title, width: 440, onClose: () => resolve(answer) });
+    modal.body.appendChild(h("div", { class: "modal-form" }, h("p", { class: "modal-msg" }, opts.message)));
+    const finish = (v: T | null) => { answer = v; modal.close(); };
+    const last = opts.choices.length - 1;
+    const buttons = opts.choices.map((c, i) => button(c.label, i === last, () => finish(c.value)));
+    modal.footer.append(h("div", { class: "spacer" }), button(opts.cancel ?? "Cancel", false, () => finish(null)), ...buttons);
+    onEnter(modal, () => finish(opts.choices[last]!.value));
+    buttons[last]?.focus();
+  });
+}
+
 export interface PromptTextOptions {
   title: string;
   label: string;

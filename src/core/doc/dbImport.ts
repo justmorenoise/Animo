@@ -32,6 +32,7 @@ import {
 } from "./types";
 import { createAnimation, createImageItem, createLayer, createNode, type NewProjectDefaults } from "./defaults";
 import { normalizeMasks } from "./layerTree";
+import { bakeDrawOrder } from "./dbDrawOrder";
 import {
   allFrameChannels, anglesOf, asArr, asObj, bool, colorChannel, colorOf, displayChannel, keysFor, type NodeChannels, num,
   type Raw, rotateChannel, scaleChannel, str, translateChannel,
@@ -55,12 +56,20 @@ export interface DbImportInput {
   extensions?: unknown;
   /** The stage, frame rate and background when the file gives none. */
   defaults?: NewProjectDefaults;
+  /**
+   * Slots the layer tree cannot draw in the file's order: left in the rig
+   * and named (`"rig"`, the default), or moved to their place and keyed on
+   * every frame, no longer following their bones (`"keys"`, `dbDrawOrder.ts`).
+   */
+  drawOrder?: "rig" | "keys";
 }
 
 export interface DbImportResult {
   project: Project;
   /** What was dropped or changed on the way in, one sentence each. */
   warnings: string[];
+  /** The slots, by armature, that the rig cannot draw in the file's order: what `drawOrder` decides about. */
+  outOfOrder: Array<{ armature: string; slots: string[] }>;
 }
 
 /** A file that is not a DragonBones project this importer reads. */
@@ -134,7 +143,8 @@ export function buildDbImport(input: DbImportInput): DbImportResult {
     return item;
   };
 
-  const ctx: ArmatureContext = { symbols, imageFor, warn };
+  const outOfOrder: DbImportResult["outOfOrder"] = [];
+  const ctx: ArmatureContext = { symbols, imageFor, warn, drawOrder: input.drawOrder ?? "rig", outOfOrder };
   for (const arm of armatures) {
     const sym = symbols.get(str(arm.name));
     if (sym && !sym.layers.length && !sym.animations.length) buildArmature(arm, sym, ctx);
@@ -161,7 +171,7 @@ export function buildDbImport(input: DbImportInput): DbImportResult {
     project.items[item.id] = item;
     project.itemOrder.push(item.id);
   }
-  return { project, warnings };
+  return { project, warnings, outOfOrder };
 }
 
 function checkVersion(version: string, warn: (m: string) => void): void {
@@ -223,6 +233,8 @@ interface ArmatureContext {
   symbols: Map<string, SymbolItem>;
   imageFor: (texture: string) => ImageItem | null;
   warn: (m: string) => void;
+  drawOrder: "rig" | "keys";
+  outOfOrder: DbImportResult["outOfOrder"];
 }
 
 function readDisplay(raw: Raw | null, slot: string, ctx: ArmatureContext): Display | null {
@@ -251,7 +263,8 @@ function readDisplay(raw: Raw | null, slot: string, ctx: ArmatureContext): Displ
 
 interface SlotInfo { raw: Raw; name: string; bone: string; z: number; displays: Array<Display | null> }
 
-function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
+/** `noMerge`: bones whose slot stays a node of its own, under a name of its own, so it can move. */
+function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext, noMerge: ReadonlySet<string> = new Set()): void {
   const { warn } = ctx;
   const armName = str(arm.name);
   const skins = asArr(arm.skin);
@@ -315,7 +328,7 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
   const merged = new Map<string, SlotInfo>();
   for (const [bone, on] of slotsOn) {
     const s = on[0]!;
-    if (!bone || on.length !== 1 || s.name !== bone || inIk.has(bone)) continue;
+    if (!bone || on.length !== 1 || s.name !== bone || inIk.has(bone) || noMerge.has(bone)) continue;
     const first = setupDisplay(s);
     if (!first) continue;
     const t = first.transform;
@@ -332,6 +345,9 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     names.add(n);
     return n;
   };
+  // A slot taken apart from its bone keeps its name, which game code looks
+  // slots up by; the bone, which it no longer follows, is renamed.
+  for (const bname of noMerge) names.add(bname);
   const boneNodes = new Map<string, Node>();
   for (const [bname, b] of bones) {
     const m = merged.get(bname);
@@ -345,6 +361,8 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     if (!bool(b.inheritScale, true)) node.inheritScale = false;
     boneNodes.set(bname, node);
   }
+  const renamed = [...noMerge].map((b) => `"${b}" is "${boneNodes.get(b)!.name}"`);
+  if (renamed.length) warn(`"${armName}": bones renamed so that their slots keep their names: ${renamed.join(", ")}.`);
   for (const [bname, node] of boneNodes) {
     const p = parentOf(bname);
     node.parentId = p ? boneNodes.get(p)!.id : null;
@@ -356,7 +374,8 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     // A slot named after its bone keeps that name: the export writes it back
     // onto that bone, as DragonBones Pro does (`slotsOnTheirBone`).
     const sameAsBone = !m && s.bone !== "" && s.name === s.bone && boneNodes.get(s.bone)!.name === s.name;
-    const node = m ? boneNodes.get(s.bone)! : createNode(setupDisplay(s)?.kind ?? "empty", sameAsBone ? s.name : nodeName(s.name));
+    const reserved = s.name === s.bone && noMerge.has(s.bone);
+    const node = m ? boneNodes.get(s.bone)! : createNode(setupDisplay(s)?.kind ?? "empty", sameAsBone || reserved ? s.name : nodeName(s.name));
     if (!m) {
       node.parentId = s.bone ? boneNodes.get(s.bone)!.id : null;
       if (node.name !== s.name) warn(`"${armName}": slot "${s.name}" shares its name with another node; it is "${node.name}" in Animo.`);
@@ -379,10 +398,34 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext): void {
     }];
   });
 
-  sym.layers = layersFor(sym, slots, boneNodes, slotNodes, warn, armName);
+  const { layers, moved } = layersFor(sym, slots, boneNodes, slotNodes);
+  sym.layers = layers;
   nodeOfSlot.set(sym, new Map([...slotNodes].map(([name, s]) => [name, s.node.id])));
   sym.animations = animationsOf(arm, boneNodes, slotNodes, warn);
   if (!sym.animations.length) sym.animations = [createAnimation()];
+  if (!moved.length) return;
+
+  const listed = moved.map((s) => `"${s.name}"`).join(", ");
+  if (ctx.drawOrder === "rig") {
+    if (noMerge.size === 0) ctx.outOfOrder.push({ armature: armName, slots: moved.map((s) => s.name) });
+    warn(`"${armName}": ${listed} cannot keep the file's draw order, because Animo draws everything under a bone together; check them against the original.`);
+    return;
+  }
+  // A slot that is its bone's node cannot move without the bone, and one that
+  // only shares its name goes back onto the bone at export: build again with it apart.
+  const apart = moved.filter((s) => s.bone && s.name === s.bone && !noMerge.has(s.bone)).map((s) => s.bone);
+  if (apart.length) {
+    Object.assign(sym, { nodes: {}, layers: [], ik: [], animations: [] });
+    buildArmature(arm, sym, ctx, new Set([...noMerge, ...apart]));
+    return;
+  }
+  ctx.outOfOrder.push({ armature: armName, slots: moved.map((s) => s.name) });
+  const z = new Map(slots.map((s) => [slotNodes.get(s.name)!.node.id, s.z]));
+  const flat = bakeDrawOrder(sym, z, new Set(moved.map((s) => slotNodes.get(s.name)!.node.id)));
+  warn(`"${armName}": ${listed} keep the file's draw order with a key on every frame; they no longer follow their bones or IK.`);
+  for (const [id, frames] of flat) {
+    warn(`"${armName}": "${sym.nodes[id]!.name}" hangs from a node scaled to nothing on ${frames} frame(s), where it keeps the frame before.`);
+  }
 }
 
 /** The display a slot shows in the setup pose, or its first when that one is hidden or gone. */
@@ -439,9 +482,8 @@ function blendOf(raw: unknown): BlendMode | null {
 /* ── Draw order ───────────────────────────────────────────────────────────*/
 
 function layersFor(
-  sym: SymbolItem, slots: SlotInfo[], boneNodes: Map<string, Node>,
-  slotNodes: Map<string, { node: Node }>, warn: (m: string) => void, armName: string,
-): Layer[] {
+  sym: SymbolItem, slots: SlotInfo[], boneNodes: Map<string, Node>, slotNodes: Map<string, { node: Node }>,
+): { layers: Layer[]; moved: SlotInfo[] } {
   const zOf = new Map<NodeId, number>();
   for (const s of slots) zOf.set(slotNodes.get(s.name)!.node.id, s.z);
   const children = new Map<NodeId | null, Node[]>();
@@ -476,11 +518,7 @@ function layersFor(
   // Top row first, so the file's z runs downwards; what breaks the run moved.
   const drawn = layers.map((l) => zOf.get(l.nodeId)).filter((z): z is number => z !== undefined);
   const kept = longestDecreasing(drawn);
-  const moved = slots.filter((s) => !kept.has(s.z)).map((s) => `"${s.name}"`);
-  if (moved.length) {
-    warn(`"${armName}": ${moved.join(", ")} cannot keep the file's draw order, because Animo draws everything under a bone together; check them against the original.`);
-  }
-  return layers;
+  return { layers, moved: slots.filter((s) => !kept.has(s.z)) };
 }
 
 /** The values of the longest strictly decreasing run (not necessarily contiguous). */

@@ -1164,8 +1164,21 @@ a refused file (4.x, binary, no skeleton) leaves the work as it was.
 - **Draw order.** Animo draws the layer list depth first, so a bone's subtree is drawn together;
   DragonBones orders slots freely. Siblings are sorted by the front-most slot under them, which
   keeps the file's order whenever it follows the bones; the slots it cannot keep are named
-  (`longestDecreasing`). A merged node draws in front of its children, so a slot is merged only
-  when it is in front of every slot under its bone.
+  (`longestDecreasing`) in `DbImportResult.outOfOrder`. A merged node draws in front of its
+  children, so a slot is merged only when it is in front of every slot under its bone.
+- **When the order cannot be kept, the user chooses.** `openDragonBones` builds once with
+  stand-in images; when `outOfOrder` is not empty it asks (`chooseDrawOrder`, a `choiceDialog`)
+  before registering anything. `drawOrder: "rig"` leaves those slots on their bones and warns.
+  `"keys"` runs `bakeDrawOrder` (`dbDrawOrder.ts`): each slot goes next to the kept slot just
+  behind it in the file, under that slot's parent, and gets a linear key on every frame of every
+  animation holding its world matrix (IK included) in the new parent's space, its display and
+  colour. The picture is the file's; the slot no longer follows its bone. A moved slot that was
+  named like its bone is built again with that bone left apart (`noMerge`): a merged node cannot
+  move without the bone, and a slot sharing its bone's name goes back onto the bone at export
+  (`slotsOnTheirBone`). The slot keeps its name, which game code looks it up by; the bone is
+  renamed. On a frame where the new parent is scaled to nothing no key can place the slot: it
+  holds the frame before, with a warning. On the official demos `parity.js` checks the order frame by
+  frame against the runtime's `_zOrder`.
 - **Timelines** (`dbTimeline.ts`). Each DragonBones channel has its own frames and eases; an
   Animo key holds them all. Keys go at the union of every channel's frames, each channel is
   sampled there, and its ease is cut where another channel has a key (`subTween` in
