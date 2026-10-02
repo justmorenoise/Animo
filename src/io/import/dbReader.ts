@@ -36,7 +36,8 @@ export function subTextureRegion(st: Record<string, unknown>, page: string): Atl
     name: str(st.name), page,
     x: num(st.x, 0), y: num(st.y, 0), w: num(st.width, 0), h: num(st.height, 0),
     rotation: bool(st.rotated, false) ? 90 : 0,
-    offsetX: -num(st.frameX, 0), offsetY: -num(st.frameY, 0), width: 0, height: 0,
+    // 0 - x, not -x: an untrimmed region's offset is 0, not -0.
+    offsetX: 0 - num(st.frameX, 0), offsetY: 0 - num(st.frameY, 0), width: 0, height: 0,
   };
   const shown = shownSize(r);
   r.width = num(st.frameWidth, 0) > 0 ? num(st.frameWidth, 0) : shown.w;

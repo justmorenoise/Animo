@@ -1,6 +1,6 @@
 import { strToU8 } from "fflate";
 import { describe, expect, it } from "vitest";
-import { sortDbFiles, subTextureCut } from "@/io/import/dbReader";
+import { sortDbFiles, subTextureCut, subTextureRegion } from "@/io/import/dbReader";
 import { DbImportError } from "@/core/doc/dbImport";
 
 /** Where `m` sends a point of the region (u along its width, v along its height). */
@@ -68,5 +68,12 @@ describe("sortDbFiles", () => {
   it("refuses binary files and a missing skeleton", () => {
     expect(() => sortDbFiles(new Map([["x.dbbin", new Uint8Array()]]))).toThrow(/Binary DragonBones/);
     expect(() => sortDbFiles(new Map([["x_tex.json", json({ SubTexture: [] })]]))).toThrow(DbImportError);
+  });
+});
+
+describe("subTextureRegion", () => {
+  it("an untrimmed region's offset is 0, not -0", () => {
+    const r = subTextureRegion({ name: "a", x: 0, y: 0, width: 4, height: 4 }, "p");
+    expect(Object.is(r.offsetX, 0) && Object.is(r.offsetY, 0)).toBe(true);
   });
 });
