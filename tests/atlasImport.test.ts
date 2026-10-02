@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AssetStore } from "@/app/AssetStore";
+import { importAtlas } from "@/app/AtlasImport";
+import { Store } from "@/app/Store";
+import { createProject } from "@/core/doc/defaults";
 import { type AssetId, reseed } from "@/core/doc/ids";
 import { type AtlasRegion, regionCut } from "@/core/atlas/region";
 import { buildAtlasImport, imageName, sequencesOf } from "@/core/doc/atlasImport";
@@ -91,5 +95,49 @@ describe("buildAtlasImport", () => {
     const r = buildAtlasImport("hero", "hero", [img("walk"), img("01"), img("02")],
       [{ name: "walk", frames: ["01", "02"] }, { name: "", frames: ["01", "02"] }], () => false);
     expect(r.symbols.map((s) => s.name)).toEqual(["walk_2", "hero"]);
+  });
+});
+
+describe("importAtlas", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const blob = (s: string) => new Blob([s]);
+  const decode = () => (vi.stubGlobal("ImageBitmap", class {}), vi.stubGlobal("createImageBitmap", async (b: Blob) => {
+    if ((await b.text()).startsWith("bad")) throw new Error("cannot decode");
+    return { width: 4, height: 4, close() {} };
+  }));
+  const setup = async () => {
+    const project = createProject("Atlas");
+    const store = new Store(project);
+    const assets = new AssetStore();
+    decode();
+    const kept = await assets.addFromBlob(blob("same"), "kept");
+    return { store, assets, kept };
+  };
+  const img = (name: string, content = name) => ({ name, blob: blob(content), width: 4, height: 4 });
+
+  it("one undo step takes the folder, the images and the symbols away again", async () => {
+    const { store, assets } = await setup();
+    const before = Object.keys(store.project.items).length;
+    const out = await importAtlas(store, assets, "hero", [img("w1.png"), img("w2.png")], [{ name: "walk", frames: ["w1.png", "w2.png"] }]);
+    expect(out).toEqual({ folderName: "hero", images: 2, symbols: 1 });
+    expect(Object.keys(store.project.items).length).toBe(before + 3);
+    expect(store.selection.items.map((id) => store.project.items[id]!.name)).toEqual(["walk"]);
+    store.history.undo();
+    expect(Object.keys(store.project.items).length).toBe(before);
+    expect(Object.values(store.project.folders)).toEqual([]);
+  });
+
+  it("an image that cannot be read takes back only the assets it added, not one it shared with the document", async () => {
+    const { store, assets, kept } = await setup();
+    await expect(importAtlas(store, assets, "hero", [img("a", "same"), img("b"), img("c", "bad")], [])).rejects.toThrow();
+    expect(assets.all().map((a) => a.id)).toEqual([kept.id]);
+    expect(Object.values(store.project.folders)).toEqual([]);
+  });
+
+  it("so does a failure once every image is in", async () => {
+    const { store, assets, kept } = await setup();
+    vi.spyOn(store, "transaction").mockImplementation(() => { throw new Error("broken"); });
+    await expect(importAtlas(store, assets, "hero", [img("a", "same"), img("b")], [])).rejects.toThrow("broken");
+    expect(assets.all().map((a) => a.id)).toEqual([kept.id]);
   });
 });

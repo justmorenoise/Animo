@@ -81,6 +81,33 @@ export function alertDialog(opts: AlertOptions): Promise<void> {
   });
 }
 
+export interface CheckOptions {
+  title: string;
+  message: string;
+  /** A box the answer carries, ticked or not to start with. */
+  check: { label: string; checked: boolean };
+  ok?: string;
+  cancel?: string;
+  width?: number;
+}
+
+/** The box's state when answered with the primary button; null when cancelled. */
+export function checkDialog(opts: CheckOptions): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    let answer: boolean | null = null;
+    const modal = new Modal({ title: opts.title, width: opts.width ?? 440, onClose: () => resolve(answer) });
+    const input = h("input", { type: "checkbox" }) as HTMLInputElement;
+    input.checked = opts.check.checked;
+    modal.body.appendChild(h("div", { class: "modal-form" },
+      h("p", { class: "modal-msg" }, opts.message), h("label", { class: "modal-check" }, input, opts.check.label)));
+    const finish = (yes: boolean) => { answer = yes ? input.checked : null; modal.close(); };
+    const ok = button(opts.ok ?? "OK", true, () => finish(true));
+    modal.footer.append(h("div", { class: "spacer" }), button(opts.cancel ?? "Cancel", false, () => finish(false)), ok);
+    onEnter(modal, () => finish(true));
+    ok.focus();
+  });
+}
+
 export interface ChoiceOptions<T> {
   title: string;
   message: string;

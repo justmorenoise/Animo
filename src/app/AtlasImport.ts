@@ -28,6 +28,7 @@ export async function importAtlas(
   // Identical pixels share an asset: only the ones new here go if this fails.
   const before = new Set(assets.all().map((a) => a.id));
   const added = new Set<AssetId>();
+  let plan: ReturnType<typeof buildAtlasImport>;
   try {
     for (const [i, img] of images.entries()) {
       const asset = await assets.addFromBlob(img.blob, img.name);
@@ -35,16 +36,18 @@ export async function importAtlas(
       registered.push({ name: img.name, assetId: asset.id, width: img.width, height: img.height, pivot: img.pivot });
       report((i + 1) / images.length);
     }
+    // Read after the awaits: the library may have changed meanwhile.
+    const taken = new Set(Object.values(store.project.items).map((i) => i.name));
+    plan = buildAtlasImport(name, uniqueFolderName(store.project, null, name), registered, sequences, (n) => taken.has(n));
+    const p = plan;
+    store.transaction(`Import ${name}`, () => {
+      store.apply(new AddFolder(p.folder));
+      for (const item of p.items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
+    });
   } catch (err) {
     for (const id of added) assets.remove(id);
     throw err;
   }
-  const taken = new Set(Object.values(store.project.items).map((i) => i.name));
-  const plan = buildAtlasImport(name, uniqueFolderName(store.project, null, name), registered, sequences, (n) => taken.has(n));
-  store.transaction(`Import ${name}`, () => {
-    store.apply(new AddFolder(plan.folder));
-    for (const item of plan.items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
-  });
   store.selectItems(plan.symbols.length ? plan.symbols.map((s) => s.id) : plan.items.map((i) => i.id));
   store.emit("library");
   return { folderName: plan.folder.name, images: plan.items.length - plan.symbols.length, symbols: plan.symbols.length };
