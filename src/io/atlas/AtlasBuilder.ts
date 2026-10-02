@@ -298,8 +298,9 @@ export async function buildAtlas(
         name: entry.item.name,
         x: rect.x + opts.extrude,
         y: rect.y + opts.extrude,
-        width: entry.trim.width,
-        height: entry.trim.height,
+        // A turned region's width and height are as on the page, as the runtime reads them.
+        width: rect.rotated ? entry.trim.height : entry.trim.width,
+        height: rect.rotated ? entry.trim.width : entry.trim.height,
       };
       if (!entry.trim.untrimmed) {
         sub.frameX = -entry.trim.x;
@@ -386,16 +387,18 @@ function renderPage(
     ctx.restore();
 
     // Extrusion: duplicate the outer row/column outward so bilinear sampling
-    // at non-integer scale cannot pull in a neighbour's pixels.
-    if (opts.extrude > 0 && !rect.rotated) {
+    // at non-integer scale cannot pull in a neighbour's pixels. Copied from
+    // the page, so a turned region's edges are its own.
+    if (opts.extrude > 0) {
       const e = opts.extrude;
+      const w = rect.rotated ? t.height : t.width;
+      const h = rect.rotated ? t.width : t.height;
       // Left / right
-      ctx.drawImage(src, t.x, t.y, 1, t.height, dx - e, dy, e, t.height);
-      ctx.drawImage(src, t.x + t.width - 1, t.y, 1, t.height, dx + t.width, dy, e, t.height);
+      ctx.drawImage(canvas, dx, dy, 1, h, dx - e, dy, e, h);
+      ctx.drawImage(canvas, dx + w - 1, dy, 1, h, dx + w, dy, e, h);
       // Top / bottom (including the corners just written)
-      ctx.drawImage(canvas, dx - e, dy, t.width + e * 2, 1, dx - e, dy - e, t.width + e * 2, e);
-      ctx.drawImage(canvas, dx - e, dy + t.height - 1, t.width + e * 2, 1,
-                    dx - e, dy + t.height, t.width + e * 2, e);
+      ctx.drawImage(canvas, dx - e, dy, w + e * 2, 1, dx - e, dy - e, w + e * 2, e);
+      ctx.drawImage(canvas, dx - e, dy + h - 1, w + e * 2, 1, dx - e, dy + h, w + e * 2, e);
     }
   }
 

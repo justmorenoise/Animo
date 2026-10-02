@@ -1234,6 +1234,15 @@ translates fields: DragonBones' SubTexture (`subTextureRegion`: `frameX/Y` are m
 offset, turned clockwise, `width/height` as on the page) here, the other formats in the
 desktop edition.
 
+`buildAtlas` turns a region clockwise when the packer allows rotation (off for the
+DragonBones export: the vendored Pixi runtime passes `rotated` to Pixi as `rotate: 1`, an
+eighth of a turn). Its SubTexture then has the page's width and height, as the runtime reads
+them, and its extruded edges are copied from the page, so they are the turned image's own.
+Checked by cutting every region of `frog.animo` back with `regionCut`: identical pixels.
+
+A project file with a `kind` other than `animation` (an Animo Pro atlas project) is refused by
+`validateProject` with a message that says what it is.
+
 `buildAtlasImport` (`core/doc/atlasImport.ts`, pure) puts the images in one library folder
 named after the atlas and, for each sequence (`sequencesOf`: a shared prefix and a number at
 the end, two frames or more; or the animations the format lists), a symbol with one node whose

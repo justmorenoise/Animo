@@ -138,6 +138,13 @@ describe("project round trip", () => {
 });
 
 describe("schema validation", () => {
+  it("refuses a project of another kind, naming the atlas projects of Animo Pro", () => {
+    const atlas = { ...createProject("A"), kind: "atlas" };
+    expect(() => validateProject(atlas)).toThrow("kind: this is an atlas project, which Animo Pro opens");
+    expect(() => validateProject({ ...createProject("B"), kind: "film" })).toThrow('a project of kind "film"');
+    expect(validateProject({ ...createProject("C"), kind: "animation" }).project.name).toBe("C");
+  });
+
   const base = () => {
     const p = createProject("V");
     const sym = p.items[p.rootSymbolId] as SymbolItem;

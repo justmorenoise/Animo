@@ -35,6 +35,11 @@ export function validateProject(raw: unknown): ValidationResult {
   const p = raw as Project;
 
   if (typeof p.version !== "number") fail("version", "missing");
+  // An atlas project (Animo Pro) is a library with no scene to animate.
+  const kind = (raw as { kind?: unknown }).kind;
+  if (kind !== undefined && kind !== "animation") {
+    fail("kind", kind === "atlas" ? "this is an atlas project, which Animo Pro opens" : `a project of kind "${String(kind)}" is not one this build opens`);
+  }
   if (p.version > DOC_VERSION) {
     fail("version", `file is version ${p.version}, this build understands up to ${DOC_VERSION}`);
   }
