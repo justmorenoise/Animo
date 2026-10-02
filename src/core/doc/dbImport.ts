@@ -340,8 +340,9 @@ function buildArmature(arm: Raw, sym: SymbolItem, ctx: ArmatureContext, noMerge:
   // Nodes: names unique within the symbol, as the exporter needs them.
   const names = new Set<string>();
   const nodeName = (base: string) => {
-    let n = base || "node";
-    for (let i = 2; names.has(n); i++) n = `${base}_${i}`;
+    const stem = base || "node";
+    let n = stem;
+    for (let i = 2; names.has(n); i++) n = `${stem}_${i}`;
     names.add(n);
     return n;
   };

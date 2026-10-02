@@ -127,6 +127,11 @@ describe("bones and slots", () => {
       expect(all).toMatch(re);
     }
   });
+
+  it("nodes the file leaves unnamed are node, node_2…", () => {
+    const { project } = open({ bone: [{ name: "" }], slot: [{ name: "", parent: "" }, { name: "s", parent: "" }] });
+    expect(Object.values(rootOf(project).nodes).map((n) => n.name).sort()).toEqual(["node", "node_2", "s"]);
+  });
 });
 
 describe("timelines", () => {
