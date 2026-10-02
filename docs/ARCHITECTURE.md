@@ -1223,6 +1223,23 @@ a refused file (4.x, binary, no skeleton) leaves the work as it was.
   convention (stored 90° clockwise), and the import says which, since no Animo export has any to
   test against.
 
+## Atlas regions and atlas import
+
+Every atlas format comes down to `AtlasRegion` (`core/atlas/region.ts`): the rectangle as
+stored on the page, a turn (`90` clockwise, `-90` counter-clockwise), the trimmed image's
+offset in the untrimmed one, the untrimmed size, and a pivot when the format has one.
+`regionCut` turns it into the transform that draws the region back; `cutRegions`
+(`io/import/atlasCut.ts`) does the drawing, off the page where it can. A reader only
+translates fields: DragonBones' SubTexture (`subTextureRegion`: `frameX/Y` are minus the
+offset, turned clockwise, `width/height` as on the page) here, the other formats in the
+desktop edition.
+
+`buildAtlasImport` (`core/doc/atlasImport.ts`, pure) puts the images in one library folder
+named after the atlas and, for each sequence (`sequencesOf`: a shared prefix and a number at
+the end, two frames or more; or the animations the format lists), a symbol with one node whose
+display list is the frames and a key wherever the picture changes. `app/AtlasImport.ts`
+registers the assets and adds it all as one undo step.
+
 ## The library panel
 
 Sorting is a VIEW concern: `LibraryPanel.renderList` sorts by name (ascending by default,
