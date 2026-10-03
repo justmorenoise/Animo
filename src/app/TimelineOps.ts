@@ -1,5 +1,7 @@
 import type { Store } from "./Store";
+import type { History } from "@/core/history/History";
 import type {
+    Animation,
     BlendMode,
     ColorTransform,
     DisplayRef,
@@ -473,19 +475,24 @@ export function editsMultipleFrames(store: Store): boolean {
  * pointer-down ones too — applying the edit to the live, already edited keys
  * would compound it on every pointermove. Same rule as `doMoveKeyframes`.
  */
-let dragBase: { serial: number; animId: string; tracks: Record<string, Track | undefined> } | null = null;
+/** One per history, so each document has its own; the animation is told
+ *  apart by the object, since two documents opened from copies of one file
+ *  share every id. */
+const dragBases = new WeakMap<History, { serial: number; anim: Animation; tracks: Record<string, Track | undefined> }>();
 
 function baseTracks(store: Store, interactive: boolean): Record<string, Track | undefined> {
   const anim = store.currentAnimation!;
-  const serial = store.history.interactionSerial;
-  if (!interactive || !store.history.inInteraction) {
-    dragBase = null;
+  const history = store.history;
+  if (!interactive || !history.inInteraction) {
+    dragBases.delete(history);
     return anim.tracks;
   }
-  if (!dragBase || dragBase.serial !== serial || dragBase.animId !== anim.id) {
-    dragBase = { serial, animId: anim.id, tracks: { ...anim.tracks } };
+  let base = dragBases.get(history);
+  if (!base || base.serial !== history.interactionSerial || base.anim !== anim) {
+    base = { serial: history.interactionSerial, anim, tracks: { ...anim.tracks } };
+    dragBases.set(history, base);
   }
-  return dragBase.tracks;
+  return base.tracks;
 }
 
 /**

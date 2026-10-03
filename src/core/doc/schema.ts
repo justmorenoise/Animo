@@ -181,8 +181,14 @@ export function validateProject(raw: unknown): ValidationResult {
       anim.playTimes = clampInt(anim.playTimes, 0, 10000, 0);
       anim.tracks ??= {};
       for (const [nodeId, track] of Object.entries(anim.tracks)) {
-        if (!item.nodes[nodeId as never] || !track?.keys?.length) {
+        if (!item.nodes[nodeId as never] || !Array.isArray(track?.keys)) {
           delete anim.tracks[nodeId as never];
+          continue;
+        }
+        // No keys: the layer is off stage in this animation (what a frame drag
+        // that took everything leaves). Dropping the track put it back on.
+        if (!track.keys.length) {
+          track.endFrame = -1;
           continue;
         }
         track.keys.sort((a, b) => a.frame - b.frame);

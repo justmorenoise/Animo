@@ -2,6 +2,7 @@ import type { Store } from "./Store";
 import { uniqueFolderName } from "@/core/doc/libraryTree";
 import { AddFolder } from "@/core/history/libraryCommands";
 import type { AssetStore } from "./AssetStore";
+import { AssetBatch } from "./AssetBatch";
 import { phase, type ReportProgress } from "./busy";
 import { type PsdRaw, readPsdFile } from "@/io/import/psdReader";
 import { buildPsdImport, type PsdPlan } from "@/core/doc/psdImport";
@@ -43,6 +44,8 @@ export async function importPsd(
   // Assets are registered before the transaction opens: they live outside the
   // document (the project stores only an AssetId), and decoding is async,
   // which a command must never be.
+  // A PSD that fails halfway gives back the layers it had registered.
+  const batch = new AssetBatch(assets);
   let images = 0;
   const toPlan = async (raw: PsdRaw[]): Promise<PsdPlan[]> => {
     const out: PsdPlan[] = [];
@@ -54,7 +57,7 @@ export async function importPsd(
         });
         continue;
       }
-      const asset = await assets.addFromBlob(node.blob, node.name || "layer");
+      const asset = await batch.addFromBlob(node.blob, node.name || "layer");
       registered(++images / totalImages);
       out.push({
         kind: "image",
@@ -68,49 +71,54 @@ export async function importPsd(
     return out;
   };
 
-  const plan = await toPlan(doc.children);
-  const taken = new Set(Object.values(store.project.items).map((i) => i.name));
-  // Its groups become library folders under one named after the file: a PSD
-  // brings dozens of items, and loose they bury the rest of the library.
-  const { items, root, folders } = buildPsdImport(
-    doc.name, plan, (name) => taken.has(name), uniqueFolderName(store.project, null, doc.name));
+  try {
+    const plan = await toPlan(doc.children);
+    const taken = new Set(Object.values(store.project.items).map((i) => i.name));
+    // Its groups become library folders under one named after the file: a PSD
+    // brings dozens of items, and loose they bury the rest of the library.
+    const { items, root, folders } = buildPsdImport(
+      doc.name, plan, (name) => taken.has(name), uniqueFolderName(store.project, null, doc.name));
 
-  const hostId = store.currentSymbolId;
-  // A PSD is usually bigger than an 800x600 stage, and landing mostly
-  // off-stage looks broken. In an empty project the document defines the
-  // frame, so adopt its canvas; in a project with work in it, touching the
-  // stage would be presumptuous.
-  const empty = hostId === store.project.rootSymbolId
-    && store.currentSymbol.layers.length === 0
-    && store.project.itemOrder.length === 1;
-  const resizeStage = empty
-    && (doc.width !== store.project.stage.width || doc.height !== store.project.stage.height);
-  const instance = createNode("symbol", root.name, { itemId: root.id, x: at.x, y: at.y });
-  const layer = createLayer(instance.id, instance.name, store.currentSymbol.layers.length);
+    const hostId = store.currentSymbolId;
+    // A PSD is usually bigger than an 800x600 stage, and landing mostly
+    // off-stage looks broken. In an empty project the document defines the
+    // frame, so adopt its canvas; in a project with work in it, touching the
+    // stage would be presumptuous.
+    const empty = hostId === store.project.rootSymbolId
+      && store.currentSymbol.layers.length === 0
+      && store.project.itemOrder.length === 1;
+    const resizeStage = empty
+      && (doc.width !== store.project.stage.width || doc.height !== store.project.stage.height);
+    const instance = createNode("symbol", root.name, { itemId: root.id, x: at.x, y: at.y });
+    const layer = createLayer(instance.id, instance.name, store.currentSymbol.layers.length);
 
-  store.transaction(`Import ${file.name}`, () => {
-    for (const f of folders) store.apply(new AddFolder(f));
-    // Children before parents, so a symbol never references an item the
-    // library has not seen yet.
-    for (const item of items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
-    store.apply(new AddNode(`Import ${root.name}`, hostId, instance, layer, 0));
-    if (resizeStage) {
-      store.apply(new SetDocumentSettings({ width: doc.width, height: doc.height }));
-    }
-  });
+    store.transaction(`Import ${file.name}`, () => {
+      for (const f of folders) store.apply(new AddFolder(f));
+      // Children before parents, so a symbol never references an item the
+      // library has not seen yet.
+      for (const item of items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
+      store.apply(new AddNode(`Import ${root.name}`, hostId, instance, layer, 0));
+      if (resizeStage) {
+        store.apply(new SetDocumentSettings({ width: doc.width, height: doc.height }));
+      }
+    });
 
-  store.selectNodes([instance.id]);
-  store.emit("library");
-  store.emit("doc");
+    store.selectNodes([instance.id]);
+    store.emit("library");
+    store.emit("doc");
 
-  if (resizeStage) store.emit("stage");
+    if (resizeStage) store.emit("stage");
 
-  return {
-    symbolName: root.name,
-    images,
-    symbols: items.length - images,
-    stage: resizeStage ? { width: doc.width, height: doc.height } : null,
-    warnings: doc.warnings,
-    folderName: folders[0]!.name,
-  };
+    return {
+      symbolName: root.name,
+      images,
+      symbols: items.length - images,
+      stage: resizeStage ? { width: doc.width, height: doc.height } : null,
+      warnings: doc.warnings,
+      folderName: folders[0]!.name,
+    };
+  } catch (err) {
+    batch.release(store.project);
+    throw err;
+  }
 }

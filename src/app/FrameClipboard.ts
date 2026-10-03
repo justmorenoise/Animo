@@ -339,7 +339,9 @@ function rowKeys(store: Store, node: Node, sel: FrameSelection): Keyframe[] {
   return keys;
 }
 
-/** Remove every keyframe in a range on each row, keeping the frame-0 anchor. */
+/** Remove every keyframe in a range on each row, keeping the track's first key,
+ *  its anchor, as ⇧F6 does: on a track starting after frame 0, cutting it
+ *  left a track with no keys, and the layer gone from frames outside the range. */
 function clearRange(store: Store, sel: FrameSelection, label: string): void {
   const anim = store.currentAnimation;
   if (!anim) return;
@@ -347,7 +349,7 @@ function clearRange(store: Store, sel: FrameSelection, label: string): void {
   for (const id of sel.nodeIds) {
     const track = anim.tracks[id];
     if (!track) continue;
-    const keys = track.keys.filter((k) => k.frame === 0 || k.frame < sel.from || k.frame > sel.to);
+    const keys = track.keys.filter((k, i) => i === 0 || k.frame < sel.from || k.frame > sel.to);
     if (keys.length !== track.keys.length) tracks.set(id, { ...track, keys });
   }
   if (!tracks.size) return;

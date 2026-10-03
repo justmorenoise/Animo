@@ -239,15 +239,16 @@ export function buildSlotTimeline(
   track: Track, slotName: string, animDuration: number,
   displays?: Map<number, number>,
 ): DbSlotTimeline | null {
-  if (track.keys.length === 0) return null;
   const keys = displays
     ? track.keys.map((k) => ({ ...k, displayIndex: k.displayIndex < 0 ? -1 : displays.get(k.displayIndex) ?? -1 }))
     : track.keys;
 
   // Outside its span the stage shows nothing (`pose.localAt`), so a track that
   // starts late or ends early needs a display timeline to hide the slot too.
-  const startsLate = keys[0]!.frame > 0;
-  const endsEarly = track.endFrame + 1 < animDuration;
+  // A track with no keys left (a frame drag took all it showed) hides it throughout.
+  const empty = keys.length === 0;
+  const startsLate = empty || keys[0]!.frame > 0;
+  const endsEarly = !empty && track.endFrame + 1 < animDuration;
   const usesDisplay = startsLate || endsEarly || keys.some((k) => k.displayIndex !== 0);
   // An AUTHORED colour anywhere means the timeline governs, even if it is the
   // identity: with a non-default `slot.color` in the setup pose, a keyframe

@@ -38,6 +38,7 @@ export class History {
   private txLabel = "";
   private txParts: Command[] = [];
   private txTouches: TouchSet | null = null;
+  private txSelection: unknown = null;
 
   private interactionKind: string | null = null;
   private interactionEntry: HistoryEntry | null = null;
@@ -168,7 +169,9 @@ export class History {
   /** Group everything `fn` applies into one undo entry. Nesting flattens. */
   transaction<T>(label: string, fn: () => T): T {
     const outermost = this.txDepth === 0;
-    if (outermost) { this.txLabel = label; this.txParts = []; }
+    // Undo puts back the selection from before the transaction: read at the
+    // end, it was the one the transaction made (a frame drag's pasted rows).
+    if (outermost) { this.txLabel = label; this.txParts = []; this.txSelection = this.readSelection(); }
     this.txDepth++;
     try {
       return fn();
@@ -180,16 +183,17 @@ export class History {
         if (parts.length === 1) {
           this.push({
             command: parts[0]!,
-            selectionBefore: this.readSelection(),
+            selectionBefore: this.txSelection,
             selectionAfter: this.readSelection(),
           });
         } else if (parts.length > 1) {
           this.push({
             command: new CompositeCommand(this.txLabel, parts),
-            selectionBefore: this.readSelection(),
+            selectionBefore: this.txSelection,
             selectionAfter: this.readSelection(),
           });
         }
+        this.txSelection = null;
         const touches = this.txTouches;
         this.txTouches = null;
         if (touches) this.emit(touches, "apply");

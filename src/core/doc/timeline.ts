@@ -98,6 +98,17 @@ function withKeys(track: Track, keys: Keyframe[], endFrame = track.endFrame): Tr
   return { nodeId: track.nodeId, keys: sorted(keys), endFrame };
 }
 
+/** A key that shows nothing from `frame` on (F7). */
+function blankKey(frame: number, transform: Transform): Keyframe {
+  return { frame, transform: cloneTf(transform), displayIndex: -1, tween: TWEEN_NONE };
+}
+
+/** Whether the track puts its artwork on stage at `frame`: the visibility the
+ *  frame operations promise to keep outside the frames they act on. */
+export function showsAt(track: Track, frame: number): boolean {
+  return occupiesFrame(track, frame) && spanKeyAt(track, frame)!.displayIndex >= 0;
+}
+
 /* ── F6 — Insert Keyframe ─────────────────────────────────────────────────
    Duplicates the state currently showing at `frame` and makes it explicit.
    Already a keyframe? No-op.                                              */
@@ -145,12 +156,7 @@ export function insertKeyframe(track: Track, frame: number, node: Node): Track |
 
 export function insertBlankKeyframe(track: Track, frame: number, node: Node): Track | null {
   const existing = keyIndexAt(track, frame);
-  const blank: Keyframe = {
-    frame,
-    transform: cloneTf(node.bind),
-    displayIndex: -1,
-    tween: TWEEN_NONE,
-  };
+  const blank = blankKey(frame, node.bind);
   const keys = existing >= 0
     ? track.keys.map((k, i) => (i === existing ? blank : k))
     : [...track.keys, blank];
@@ -198,7 +204,13 @@ export function clearKeyframe(track: Track, frame: number): Track | null {
    "insert" is Flash's Paste Frames: everything from `at` on moves right by
    `span`, after an F6 there when `at` falls mid-span, so what moves starts
    with the pose it had. "overwrite" is Paste and Overwrite Frames: what lies
-   under the run is replaced and nothing moves.                           */
+   under the run is replaced and nothing moves.
+
+   Either way the frames outside the run show the layer, or not, as before:
+   the run's last key governs the frame after it, so where that would change
+   what shows there the frame gets a key of its own (a blank one, or the one
+   F6 would cut); and a run pasted past the end of a track with artwork
+   leaves the frames between empty, or the last key would reach across them. */
 
 export function pasteRun(
   track: Track, keys: Keyframe[], span: number, at: number,
@@ -216,6 +228,19 @@ export function pasteRun(
     );
   }
   const end = at + span - 1;
+  const after = end + 1;
+  // Once the run is in, its last key governs `after`.
+  const last = keys.reduce<Keyframe | null>((a, k) => (!a || k.frame > a.frame ? k : a), null);
+  const shownBefore = showsAt(base, after);
+  if (after <= base.endFrame && keyIndexAt(base, after) < 0 && last && (last.displayIndex >= 0) !== shownBefore) {
+    base = shownBefore
+      ? cutKeepingEase(base, after, node) ?? base
+      : withKeys(base, [...base.keys, blankKey(after, sampleTransformRaw(base, after) ?? node.bind)]);
+  }
+  if (node.itemId && at > base.endFrame + 1 && showsAt(base, base.endFrame)) {
+    // Holding the last pose: children placed through this node stay put.
+    base = withKeys(base, [...base.keys, blankKey(base.endFrame + 1, sampleTransformRaw(base, base.endFrame) ?? node.bind)]);
+  }
   const kept = base.keys.filter((k) => k.frame < at || k.frame > end);
   const pasted = keys.map((k) => ({ ...k, frame: k.frame + at }));
   return withKeys(base, [...kept, ...pasted], Math.max(base.endFrame, end));
@@ -291,13 +316,17 @@ export function moveRange(track: Track, from: number, to: number, delta: number)
  */
 export function emptyRange(track: Track, from: number, to: number, node: Node): Track | null {
   if (from > track.endFrame) return null;
-  const t = to + 1 <= track.endFrame ? cutKeepingEase(track, to + 1, node) ?? track : track;
+  // Before the first key nothing shows at `to + 1`, so there is nothing to keep:
+  // an F6 there would put the bind pose on stage until that key.
+  const t = to + 1 <= track.endFrame && spanIndexAt(track, to + 1) >= 0
+    ? cutKeepingEase(track, to + 1, node) ?? track
+    : track;
   const keys = t.keys.filter((k) => k.frame < from || k.frame > to);
   const before = keys.some((k) => k.frame < from);
   const after = keys.some((k) => k.frame > to);
   let endFrame = t.endFrame;
   if (before && after) {
-    keys.push({ frame: from, transform: cloneTf(node.bind), displayIndex: -1, tween: TWEEN_NONE });
+    keys.push(blankKey(from, node.bind));
   } else if (!after) {
     endFrame = before ? from - 1 : -1;
   }

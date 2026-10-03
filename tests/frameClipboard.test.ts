@@ -1,13 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { reseed, type AssetId } from "@/core/doc/ids";
 import { createProject, createNode, createLayer, createImageItem } from "@/core/doc/defaults";
-import { isSymbol } from "@/core/doc/types";
+import { isSymbol, type SymbolItem } from "@/core/doc/types";
 import { tf } from "@/core/math/Transform";
 import { TWEEN_LINEAR } from "@/core/math/easing";
 import { Store } from "@/app/Store";
 import { FrameClipboard } from "@/app/FrameClipboard";
 import { sampleTransformRaw } from "@/core/doc/timeline";
 import { evaluateSymbol } from "@/core/doc/pose";
+import { exportSkeleton } from "@/core/export/exportSkeleton";
+import { validateProject } from "@/core/doc/schema";
 
 beforeEach(() => reseed());
 
@@ -102,6 +104,19 @@ describe("frame clipboard", () => {
 
     clip.paste(store, n.id, 5, "overwrite");
     expect(frames(store, n.id).map((k) => k.f)).toEqual([0, 5, 12]);
+  });
+
+  it("cut keeps the first key of a track that starts after frame 0", () => {
+    const { store, n } = scene([{ f: 5, y: 70 }, { f: 12, y: 40 }]);
+    const clip = new FrameClipboard();
+    store.selection = { ...store.selection, frames: [3, 4, 5, 6, 7].map((f) => `${n.id}:${f}`) };
+    clip.cut(store);
+    expect(frames(store, n.id).map((k) => k.f)).toEqual([5, 12]);
+
+    const single = scene([{ f: 5, y: 70 }]);
+    single.store.selection = { ...single.store.selection, frames: [`${single.n.id}:5`] };
+    clip.cut(single.store);
+    expect(frames(single.store, single.n.id).map((k) => k.f)).toEqual([5]);
   });
 
   it("reads a contiguous run out of the selection", () => {
@@ -400,6 +415,52 @@ describe("dragging frames to a new location", () => {
     clip.dragTo(store, { nodeIds: [a.id], from: 25, to: 39 }, a.id, 5);
     expect(at(store, a.id)).toEqual([[0, 0], [5, 0], [10, 0], [20, 0]]);
     expect(store.currentAnimation!.tracks[a.id]!.endFrame).toBe(24);
+  });
+
+  const shown = (store: Store, id: string, f: number) =>
+    evaluateSymbol(store.currentSymbol, store.currentAnimation, f).byNode.get(id as never)!.visible;
+
+  it("past the end of a layer, leaves the frames between empty", () => {
+    const { store, a } = two();
+    store.currentAnimation!.tracks[a.id] = { ...store.currentAnimation!.tracks[a.id]!, endFrame: 19 };
+    new FrameClipboard().dragTo(store, { nodeIds: [a.id], from: 0, to: 4 }, a.id, 30, true);
+    expect([20, 25, 29].map((f) => shown(store, a.id, f))).toEqual([false, false, false]);
+    expect([30, 34].map((f) => shown(store, a.id, f))).toEqual([true, true]);
+  });
+
+  it("from before a layer's first key, puts nothing on stage", () => {
+    const { store, a, b } = two();
+    const track = store.currentAnimation!.tracks[a.id]!;
+    store.currentAnimation!.tracks[a.id] = { ...track, keys: track.keys.filter((k) => k.frame >= 10) };
+    new FrameClipboard().dragTo(store, { nodeIds: [a.id], from: 0, to: 4 }, b.id, 0);
+    expect([0, 5, 9].map((f) => shown(store, a.id, f))).toEqual([false, false, false]);
+    expect(shown(store, a.id, 10)).toBe(true);
+  });
+
+  it("taking everything a layer shows leaves it off stage in the export and after a save", () => {
+    const { project, store, a, b } = two();
+    new FrameClipboard().dragTo(store, { nodeIds: [a.id], from: 0, to: 39 }, b.id, 0);
+    expect(store.currentAnimation!.tracks[a.id]!.keys).toEqual([]);
+    expect(shown(store, a.id, 5)).toBe(false);
+
+    const slot = exportSkeleton(project).skeleton.armature.at(-1)!.animation[0]!.slot!.find((s) => s.name === "A")!;
+    expect(slot.displayFrame).toEqual([{ duration: 40, value: -1 }, { duration: 0, value: -1 }]);
+
+    const reopened = validateProject(JSON.parse(JSON.stringify(project))).project;
+    const sym = reopened.items[reopened.rootSymbolId] as SymbolItem;
+    expect(sym.animations[0]!.tracks[a.id]).toEqual({ nodeId: a.id, keys: [], endFrame: -1 });
+    expect(evaluateSymbol(sym, sym.animations[0]!, 5).byNode.get(a.id)!.visible).toBe(false);
+  });
+
+  it("undo puts back the selection the drag started from", () => {
+    const { store, a, b } = two();
+    const frames = [10, 11, 12].map((f) => `${a.id}:${f}`);
+    store.selection = { nodes: [a.id], items: [], frames };
+    new FrameClipboard().dragTo(store, { nodeIds: [a.id], from: 10, to: 12 }, b.id, 0);
+    expect(store.selection.nodes).toEqual([b.id]);
+    store.undo();
+    expect(store.selection.nodes).toEqual([a.id]);
+    expect(store.selection.frames).toEqual(frames);
   });
 
   it("is one undo step", () => {

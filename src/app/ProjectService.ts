@@ -171,7 +171,6 @@ export class ProjectService {
   async saveAs(): Promise<boolean> {
     const ref = await pickSaveLocation(this.fileName);
     if (!ref) return false;
-    this.ref = ref;
     return this.writeTo(ref);
   }
 
@@ -181,6 +180,8 @@ export class ProjectService {
       await this.busy(`Saving ${ref.name}`, async () => {
         await writeFile(ref, await serializeProject(this.store.project, this.assets));
       });
+      // Only once written: a Save As that failed leaves the document where it was.
+      this.ref = ref;
       if (this.store.history.revision === revision) {
         this.store.history.markSaved();
         // The autosave now holds nothing the file does not; left in place, the

@@ -94,6 +94,10 @@ npx tsc --noEmit   # typecheck alone; faster than a build while iterating
 - **Library keys belong to the focused list** (ARCHITECTURE ▸ Folders and
   keys): it stops the keys it handles, so the stage never sees them. Folders
   are organisation only; names stay unique across the library.
+- **An import registers its images through an `AssetBatch`** (`app/AssetBatch.ts`) and,
+  when it fails or comes to nothing, calls `release(project)`: only the assets it created
+  go, and none an image item uses. Comparing the store's ids before and after took the
+  assets of an import made meanwhile too.
 - **Heavy pixel work runs on a worker** (`io/workers/`, see ARCHITECTURE ▸ Off
   the main thread) and falls back to the page on `WorkerCrashed`. The logic
   stays in a DOM-free module the worker imports (`resampleRgba`, `parsePsd`), so

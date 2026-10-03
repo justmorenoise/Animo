@@ -1,12 +1,12 @@
 import type { Store } from "./Store";
 import type { AssetStore } from "./AssetStore";
+import { AssetBatch } from "./AssetBatch";
 import type { ReportProgress } from "./busy";
 import { uniqueFolderName } from "@/core/doc/libraryTree";
 import { AddFolder } from "@/core/history/libraryCommands";
 import { AddLibraryItem } from "@/core/history/commands";
 import { type AtlasImageIn, type AtlasSequence, buildAtlasImport } from "@/core/doc/atlasImport";
 import type { CutImage } from "@/io/import/atlasCut";
-import type { AssetId } from "@/core/doc/ids";
 
 export interface AtlasImportOutcome {
   folderName: string;
@@ -26,13 +26,11 @@ export async function importAtlas(
 ): Promise<AtlasImportOutcome> {
   const registered: AtlasImageIn[] = [];
   // Identical pixels share an asset: only the ones new here go if this fails.
-  const before = new Set(assets.all().map((a) => a.id));
-  const added = new Set<AssetId>();
+  const batch = new AssetBatch(assets);
   let plan: ReturnType<typeof buildAtlasImport>;
   try {
     for (const [i, img] of images.entries()) {
-      const asset = await assets.addFromBlob(img.blob, img.name);
-      if (!before.has(asset.id)) added.add(asset.id);
+      const asset = await batch.addFromBlob(img.blob, img.name);
       registered.push({ name: img.name, assetId: asset.id, width: img.width, height: img.height, pivot: img.pivot });
       report((i + 1) / images.length);
     }
@@ -45,7 +43,7 @@ export async function importAtlas(
       for (const item of p.items) store.apply(new AddLibraryItem(`Import ${item.name}`, item));
     });
   } catch (err) {
-    for (const id of added) assets.remove(id);
+    batch.release(store.project);
     throw err;
   }
   store.selectItems(plan.symbols.length ? plan.symbols.map((s) => s.id) : plan.items.map((i) => i.id));

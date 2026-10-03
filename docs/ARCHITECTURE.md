@@ -443,6 +443,13 @@ the moved content starts with the pose it had. With several frames selected on t
 frames are removed first — Flash's "replace the selection". **Paste and Overwrite Frames**
 (`edit.pasteOverwriteFrames`, frame menu and Edit menu, no default chord) replaces what lies
 under the run and moves nothing. Every row is one `EditTracks` in one transaction.
+Neither changes whether the layer shows outside the run. The run's last key governs the frame
+after it, so where that would change what shows there (a run before the track's first key,
+over part of a blank span, or ending on a blank key in a shown span) the frame gets a key of its
+own: a blank one, or the one F6 would cut. A run pasted past the end of a track with artwork
+leaves a blank key at `endFrame + 1` holding the last pose, or the track's last key would reach
+across the gap. `tests/frameAlgebraProperties.test.ts` checks these rules, and those of the
+other frame operations, on 300 seeded random tracks.
 
 Two more things it exists for:
 
@@ -464,7 +471,10 @@ so it is one undo step — and what follows the pointer meanwhile is an outline.
 does NOT share with Cut Frames: the frames it leaves behind become genuinely EMPTY (`cutRange`
 puts a blank key at `from` where a key before the range would otherwise keep showing, and drops
 the span when the range reached `endFrame`), and the ⌘C clipboard is untouched, because a drag
-is not a copy. The rectangle is clamped to the rows that exist — a frame drag never creates a
+is not a copy. Taking everything a layer shows leaves a track with NO keys: the layer is off
+stage for that animation, so the exporter gives its slot display `-1` throughout and
+`validateProject` keeps the track (it used to drop it, which put the layer back on stage after
+a save). Cut Frames, for its part, keeps each track's first key, as ⇧F6 does. The rectangle is clamped to the rows that exist — a frame drag never creates a
 layer, unlike a paste — and a press that goes nowhere is an ordinary click on the cell.
 A single cell is not a span: it keeps the keyframe drag, which is the gesture for it.
 

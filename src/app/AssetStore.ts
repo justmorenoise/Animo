@@ -28,11 +28,17 @@ export class AssetStore {
   all(): Asset[] { return [...this.assets.values()]; }
 
   async addFromBlob(blob: Blob, name: string): Promise<Asset> {
+    return (await this.register(blob, name)).asset;
+  }
+
+  /** `addFromBlob`, also saying whether it made a new asset or found the same
+   *  pixels already here: only a new one is the importer's to give back. */
+  async register(blob: Blob, name: string): Promise<{ asset: Asset; created: boolean }> {
     const hash = await hashBlob(blob);
     const existing = this.byHash.get(hash);
     if (existing) {
       const a = this.assets.get(existing);
-      if (a) return a;
+      if (a) return { asset: a, created: false };
     }
 
     const bitmap = await decode(blob);
@@ -46,7 +52,7 @@ export class AssetStore {
     };
     this.assets.set(asset.id, asset);
     this.byHash.set(hash, asset.id);
-    return asset;
+    return { asset, created: true };
   }
 
   /**
@@ -68,11 +74,12 @@ export class AssetStore {
   }
 
   async addFromFile(file: File): Promise<Asset> {
+    return (await this.registerFile(file)).asset;
+  }
+
+  async registerFile(file: File): Promise<{ asset: Asset; created: boolean }> {
     const name = file.name.replace(/\.[^.]+$/, "");
-    if (file.type === "image/svg+xml") {
-      return this.addFromBlob(await rasterizeSvg(file), name);
-    }
-    return this.addFromBlob(file, name);
+    return this.register(file.type === "image/svg+xml" ? await rasterizeSvg(file) : file, name);
   }
 
   /** Pixels for alpha hit-testing and atlas trimming; decoded on first ask. */

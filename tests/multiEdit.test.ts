@@ -142,3 +142,36 @@ describe("Edit Multiple Frames — the instances on stage", () => {
     expect(box.w).toBeCloseTo(100, 6);
   });
 });
+
+describe("Edit Multiple Frames across documents", () => {
+  it("a drag in one document never edits from another's keys, ids shared or not", async () => {
+    const { Store } = await import("@/app/Store");
+    const { applyEdit } = await import("@/app/TimelineOps");
+    const project = createProject("Copy");
+    const sym = project.items[project.rootSymbolId];
+    if (!isSymbol(sym)) throw new Error("no root");
+    const n = createNode("group", "n");
+    sym.nodes[n.id] = n;
+    sym.layers = [createLayer(n.id, "n", 0)];
+    sym.animations[0]!.duration = 10;
+    sym.animations[0]!.tracks[n.id] = {
+      nodeId: n.id, endFrame: 9,
+      keys: [0, 5].map((frame) => ({ frame, transform: tf(0, 0), displayIndex: 0, tween: TWEEN_NONE })),
+    };
+    // Two documents from copies of one file: every id the same.
+    const a = new Store(structuredClone(project));
+    const b = new Store(structuredClone(project));
+    b.currentAnimation!.tracks[n.id] = {
+      ...b.currentAnimation!.tracks[n.id]!,
+      keys: [0, 5].map((frame) => ({ frame, transform: tf(0, 300 + 20 * frame), displayIndex: 0, tween: TWEEN_NONE })),
+    };
+    for (const s of [a, b]) s.setUi({ editMultipleFrames: true, onionAnchor: { start: 0, end: 9 } }, "stage");
+
+    a.history.beginInteraction("drag");
+    applyEdit(a, new Map([[n.id, tf(10, 0)]]), true);
+    b.history.beginInteraction("drag");
+    applyEdit(b, new Map([[n.id, tf(10, 300)]]), true);
+    const ys = b.currentAnimation!.tracks[n.id]!.keys.map((k) => [k.frame, k.transform.y]);
+    expect(ys.filter(([f]) => f === 0 || f === 5)).toEqual([[0, 300], [5, 400]]);
+  });
+});

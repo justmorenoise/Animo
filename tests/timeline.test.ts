@@ -10,7 +10,7 @@ import {
   keyIndexAt, spanIndexAt, occupiesFrame, isTweened, moveKeyframe, moveRange, setEndFrame,
   sampleTransformRaw, sampleColorRaw, spanRange, rotationDelta,
   isolateRange, mapKeyTransforms, editableSpan,
-  pasteRun,
+  pasteRun, emptyRange, spanKeyAt,
 } from "@/core/doc/timeline";
 
 let node: Node;
@@ -398,6 +398,64 @@ describe("pasteRun", () => {
     const out = pasteRun(line(), run(500), 2, 9, "overwrite", node);
     expect(at(out)).toEqual([0, 9]);
     expect(out.endFrame).toBe(10);
+  });
+});
+
+/** Whether the track puts its artwork on stage at `f`. */
+const shows = (t: Track, f: number) => occupiesFrame(t, f) && spanKeyAt(t, f)!.displayIndex >= 0;
+const frames = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+
+describe("pasteRun leaves the layer off frames where it showed nothing", () => {
+  const image = (): Node => ({ ...createNode("image", "img"), itemId: "i_art" as Node["itemId"] });
+  const run = (): Keyframe[] => [{ frame: 0, transform: tf(0, 500), displayIndex: 0, tween: TWEEN_NONE }];
+  const held = (keys: number[], endFrame: number): Track => ({
+    nodeId: "n1" as Track["nodeId"], endFrame,
+    keys: keys.map((frame) => ({ frame, transform: tf(frame, 0), displayIndex: 0, tween: TWEEN_NONE })),
+  });
+
+  it.each(["insert", "overwrite"] as const)("past the end of the track (%s): the frames between stay empty", (mode) => {
+    const out = pasteRun(held([0], 10), run(), 3, 20, mode, image());
+    expect(frames(11, 19).filter((f) => shows(out, f))).toEqual([]);
+    expect(frames(20, 22).every((f) => shows(out, f))).toBe(true);
+    // The blank key holds the last pose, so children placed through the node stay put.
+    expect(sampleTransformRaw(out, 15)!.x).toBe(0);
+  });
+
+  it.each(["insert", "overwrite"] as const)("before the first key (%s): the frames after the run stay empty", (mode) => {
+    const out = pasteRun(held([10], 20), run(), 3, 2, mode, image());
+    expect(frames(2, 4).every((f) => shows(out, f))).toBe(true);
+    const firstKey = mode === "insert" ? 13 : 10;
+    expect(frames(5, firstKey - 1).filter((f) => shows(out, f))).toEqual([]);
+    expect(shows(out, firstKey)).toBe(true);
+  });
+
+  it("over a blank span: the rest of the blank span stays blank", () => {
+    const t = held([0, 5], 20);
+    t.keys[1] = { ...t.keys[1]!, displayIndex: -1 };
+    const out = pasteRun(t, run(), 3, 4, "overwrite", image());
+    expect(frames(4, 6).every((f) => shows(out, f))).toBe(true);
+    expect(frames(7, 20).filter((f) => shows(out, f))).toEqual([]);
+  });
+
+  it("a run ending on a blank key does not hide the frames after it", () => {
+    const blank: Keyframe[] = [{ frame: 0, transform: tf(0, 0), displayIndex: -1, tween: TWEEN_NONE }];
+    const out = pasteRun(held([0, 10], 31), blank, 1, 13, "overwrite", image());
+    expect(shows(out, 13)).toBe(false);
+    expect(frames(14, 31).every((f) => shows(out, f))).toBe(true);
+    expect(sampleTransformRaw(out, 14)!.x).toBe(10);
+  });
+
+  it("adds nothing where the frames already show", () => {
+    const out = pasteRun(held([0, 12], 23), run(), 3, 4, "overwrite", image());
+    expect(at(out)).toEqual([0, 4, 12]);
+  });
+});
+
+describe("emptyRange", () => {
+  it("before the first key, puts nothing on stage", () => {
+    const out = emptyRange(track([10], 20, false), 0, 2, node)!;
+    expect(at(out)).toEqual([10]);
+    expect(frames(0, 9).filter((f) => shows(out, f))).toEqual([]);
   });
 });
 
