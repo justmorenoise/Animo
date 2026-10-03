@@ -214,7 +214,7 @@ export class LibraryPanel implements Panel {
 
   // ── Import ─────────────────────────────────────────────────────────────
 
-  private pickFiles(): void {
+  pickFiles(): void {
     const input = h("input", { type: "file", accept: "image/*,.psd", multiple: true });
     input.style.display = "none";
     document.body.appendChild(input);

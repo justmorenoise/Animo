@@ -1268,7 +1268,7 @@ export class App {
     reg("file.openDragonBones", () => void this.pickDragonBones());
     reg("file.save", () => void this.project.save(), () => s.history.isDirty);
     reg("file.saveAs", () => void this.project.saveAs());
-    reg("file.importImages", () => this.shell.showPanel("library"));
+    reg("file.importImages", () => { this.shell.showPanel("library"); this.library.pickFiles(); });
     reg("file.importPsd", () => this.pickPsd());
     reg("file.export", () => void this.exportProject());
     reg("file.exportFolder", () => void this.exportToFolder());
