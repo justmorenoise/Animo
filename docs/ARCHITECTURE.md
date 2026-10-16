@@ -1251,7 +1251,8 @@ them, and its extruded edges are copied from the page, so they are the turned im
 Checked by cutting every region of `frog.animo` back with `regionCut`: identical pixels.
 
 A project file with a `kind` other than `animation` (an Animo Pro atlas project) is refused by
-`validateProject` with a message that says what it is.
+`validateProject` with a message that says what it is. So is a document holding a `text` item
+(Animo Pro's text), rather than opened without it.
 
 `buildAtlasImport` (`core/doc/atlasImport.ts`, pure) puts the images in one library folder
 named after the atlas and, for each sequence (`sequencesOf`: a shared prefix and a number at

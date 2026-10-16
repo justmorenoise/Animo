@@ -85,6 +85,10 @@ export function validateProject(raw: unknown): ValidationResult {
       item.height = clampInt(item.height, 1, 16384, 1);
       continue;
     }
+    if ((item as { kind: string }).kind === "text") {
+      // Text is an Animo Pro item: kept as an unknown kind, the scene would lose it silently.
+      fail(`items.${itemId}`, "this document contains text, which Animo Pro opens");
+    }
     if (item.kind !== "symbol") {
       diagnostics.push({ path: `items.${itemId}`, message: "unknown item kind, ignored", severity: "warning" });
       continue;

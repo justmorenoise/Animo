@@ -145,6 +145,12 @@ describe("schema validation", () => {
     expect(validateProject({ ...createProject("C"), kind: "animation" }).project.name).toBe("C");
   });
 
+  it("refuses a document with text, which Animo Pro opens", () => {
+    const p = createProject("T");
+    (p.items as Record<string, unknown>).t1 = { kind: "text", id: "t1", name: "Title", text: "Hi" };
+    expect(() => validateProject(p)).toThrow("items.t1: this document contains text, which Animo Pro opens");
+  });
+
   const base = () => {
     const p = createProject("V");
     const sym = p.items[p.rootSymbolId] as SymbolItem;
